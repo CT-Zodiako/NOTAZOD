@@ -16,3 +16,5 @@ app/src-tauri/target/
 .DS_Store
 .vscode/
 .idea/
+# Local Pi runtime state
+.atl/

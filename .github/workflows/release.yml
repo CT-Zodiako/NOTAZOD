@@ -26,7 +26,8 @@ jobs:
         include:
           - platform: macOS Apple Silicon
             runner: macos-14
-            bundles: dmg
+            # The `app` bundle is required for the macOS updater artifact.
+            bundles: app,dmg
           - platform: Windows
             runner: windows-latest
             bundles: nsis,msi
@@ -71,6 +72,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Required to sign updater artifacts and publish `latest.json`.
+          # Configure both as repository secrets; never commit the private key.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: app
           tagName: ${{ steps.release.outputs.tag }}
@@ -81,6 +86,9 @@ jobs:
             Download the installer for your operating system:
             - macOS Apple Silicon: `.dmg`
             - Windows: `.msi` or `.exe`
+
+            Installed copies can update themselves from this release once it is published.
+          includeUpdaterJson: true
           releaseDraft: true
           prerelease: false
           args: --bundles ${{ matrix.bundles }}

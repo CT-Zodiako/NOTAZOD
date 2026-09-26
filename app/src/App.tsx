@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { check, Update } from "@tauri-apps/plugin-updater";
 import {
   AppShell,
   Badge,
@@ -12,6 +13,7 @@ import {
   Menu,
   Modal,
   NumberInput,
+  Progress,
   Select,
   SimpleGrid,
   Stack,
@@ -161,10 +163,16 @@ function App() {
   const [activityPercent, setActivityPercent] = useState(40);
   const [examPercent, setExamPercent] = useState(60);
   const [error, setError] = useState("");
+  const [updateModal, setUpdateModal] = useState(false);
+  const [updateState, setUpdateState] = useState<"checking" | "none" | "available" | "installing" | "installed" | "error">("checking");
+  const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
+  const [updateProgress, setUpdateProgress] = useState(0);
+  const [updateError, setUpdateError] = useState("");
   const guidedFields = ["Nombre completo", "Código", "Documento", "Correo institucional", "Correo personal"];
 
   useEffect(() => {
     initDatabase().then(() => listCourses()).then(setCourses).catch(() => setCourses([])).finally(() => setLoading(false));
+    void checkForUpdates(false);
   }, []);
 
   async function handleDeleteCourse() {
@@ -527,6 +535,54 @@ function App() {
     setTemplateModal(false);
   }
 
+  async function checkForUpdates(showModal = true) {
+    if (showModal) {
+      setUpdateModal(true);
+      setUpdateState("checking");
+      setUpdateError("");
+      setUpdateProgress(0);
+      setPendingUpdate(null);
+    }
+    try {
+      const update = await check();
+      if (!update) {
+        if (showModal) setUpdateState("none");
+        return;
+      }
+      setPendingUpdate(update);
+      setUpdateState("available");
+      setUpdateModal(true);
+    } catch (cause) {
+      if (showModal) {
+        setUpdateError(cause instanceof Error ? cause.message : String(cause));
+        setUpdateState("error");
+      }
+    }
+  }
+
+  async function installUpdate() {
+    if (!pendingUpdate) return;
+    setUpdateState("installing");
+    setUpdateProgress(0);
+    setUpdateError("");
+    try {
+      let downloaded = 0;
+      let total = 0;
+      await pendingUpdate.downloadAndInstall((event) => {
+        if (event.event === "Started") total = event.data.contentLength ?? 0;
+        if (event.event === "Progress") {
+          downloaded += event.data.chunkLength;
+          setUpdateProgress(total ? Math.round((downloaded / total) * 100) : 0);
+        }
+        if (event.event === "Finished") setUpdateProgress(100);
+      });
+      setUpdateState("installed");
+    } catch (cause) {
+      setUpdateError(cause instanceof Error ? cause.message : String(cause));
+      setUpdateState("error");
+    }
+  }
+
   async function importGrades() {
     if (!gradeImportData || !activePeriod || activeState === "locked") return;
     const activityCount = gradeImportLastIsExam ? Math.max(0, gradeImportData.gradeHeaders.length - 1) : gradeImportData.gradeHeaders.length;
@@ -561,6 +617,7 @@ function App() {
             <img className="brand-logo" src="/branding/notazod-logo.png" alt="NOTAZOD" />
           </Group>
           <Group gap="xs">
+            <Button variant="subtle" size="xs" onClick={() => void checkForUpdates()} aria-label="Buscar actualizaciones de NOTAZOD">Buscar actualizaciones</Button>
             <Button variant="subtle" size="xs" onClick={() => void openUrl("https://github.com/CT-Zodiako/NOTAZOD")} aria-label="Abrir repositorio de NOTAZOD en GitHub">GitHub</Button>
             <Button variant="subtle" size="xs" onClick={() => setColorScheme(colorScheme === "dark" ? "light" : "dark")} aria-label="Cambiar tema">{colorScheme === "dark" ? "Tema claro" : "Tema oscuro"}</Button>
           </Group>
@@ -597,6 +654,37 @@ function App() {
         <Button variant="subtle" size="compact-xs" onClick={() => void openUrl("https://github.com/CT-Zodiako/NOTAZOD")} aria-label="Abrir NOTAZOD en GitHub">Ver proyecto en GitHub</Button>
       </footer>
 
+      <Modal opened={updateModal} onClose={() => setUpdateModal(false)} title="Actualizaciones" centered>
+        <Stack>
+          {updateState === "checking" ? <Text c="dimmed">Buscando actualizaciones…</Text> : null}
+          {updateState === "none" ? <Text>Ya tenés la última versión instalada.</Text> : null}
+          {updateState === "available" && pendingUpdate ? (
+            <>
+              <Text>Hay una versión nueva disponible: <b>{pendingUpdate.version}</b>.</Text>
+              {pendingUpdate.body ? <Text size="sm" c="dimmed" className="update-notes">{pendingUpdate.body}</Text> : null}
+              <Text size="xs" c="dimmed">La descarga puede tardar según tu conexión. No cierres NOTAZOD durante la instalación.</Text>
+            </>
+          ) : null}
+          {updateState === "installing" ? (
+            <>
+              <Text>Descargando e instalando la versión {pendingUpdate?.version}…</Text>
+              <Progress value={updateProgress} aria-label="Progreso de la descarga" />
+            </>
+          ) : null}
+          {updateState === "installed" ? <Text c="green">La actualización se instaló. Cerrá y volvé a abrir NOTAZOD para usar la versión nueva.</Text> : null}
+          {updateState === "error" ? (
+            <>
+              <Text c="red" role="alert">No se pudo completar la búsqueda de actualizaciones.</Text>
+              {updateError ? <Text size="xs" c="dimmed">{updateError}</Text> : null}
+            </>
+          ) : null}
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setUpdateModal(false)} disabled={updateState === "installing"}>Cerrar</Button>
+            {updateState === "available" ? <Button onClick={() => void installUpdate()}>Descargar e instalar</Button> : null}
+            {updateState === "error" ? <Button onClick={() => void checkForUpdates()}>Reintentar</Button> : null}
+          </Group>
+        </Stack>
+      </Modal>
       <Modal opened={studentDetailModal} onClose={() => setStudentDetailModal(false)} title={selectedStudent?.fullName ?? "Estudiante"} centered size="lg"><Stack>{selectedStudent ? <><Text size="sm">Código: <b>{selectedStudent.code}</b></Text><Text size="sm">Documento: <b>{selectedStudent.documentId}</b></Text><Text size="sm">Correo institucional: <b>{selectedStudent.institutionalEmail}</b></Text><Text size="sm">Correo personal: <b>{selectedStudent.personalEmail}</b></Text>{periods.map((period) => <Card key={period.id} withBorder><Stack gap="xs"><Group justify="space-between"><Text fw={700}>Corte {period.number}</Text><Badge color={period.closed ? "gray" : "green"}>{period.closed ? "Cerrado" : "Abierto"}</Badge></Group>{(itemsByPeriod[period.id] ?? []).map((item) => { const grade = gradeFor(selectedStudent.id, item.id); return <Group key={item.id} justify="space-between"><Text size="sm">{item.name}</Text><Button size="xs" variant="light" disabled={Boolean(period.closed)} onClick={() => { setStudentDetailModal(false); openGradeWalkthrough(item, students.findIndex((studentItem) => studentItem.id === selectedStudent.id)); }}>{grade ? (grade.pending ? "Pendiente 0,0" : grade.value.toFixed(1).replace(".", ",")) : "Sin nota"}</Button></Group>; })}</Stack></Card>)}</> : null}</Stack></Modal>
       <Modal opened={deleteCourseModal} onClose={() => { setDeleteCourseModal(false); setDeleteConfirmation(""); }} title="Eliminar curso" centered><Stack><Text c="red">Esta acción elimina permanentemente estudiantes, actividades y notas.</Text><Text size="sm">Escribí exactamente <b>{selectedCourse?.name}</b> para confirmar.</Text><TextInput label="Confirmación" value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.currentTarget.value)} autoFocus /><Group justify="flex-end"><Button variant="default" onClick={() => setDeleteCourseModal(false)}>Cancelar</Button><Button color="red" onClick={() => void handleDeleteCourse()} disabled={deleteConfirmation.trim() !== selectedCourse?.name}>Eliminar definitivamente</Button></Group></Stack></Modal>
       <Modal opened={courseModal} onClose={() => setCourseModal(false)} title="Crear curso" centered><Stack><TextInput label="Nombre del curso" placeholder="Ej. Cálculo I" value={name} onChange={(event) => setName(event.currentTarget.value)} required /><TextInput label="Semestre" value={semester} onChange={(event) => setSemester(event.currentTarget.value)} required /><Text size="sm" c="dimmed">Se crearán tres cortes abiertos. Podés cerrar o reabrir cada corte manualmente cuando quieras.</Text><Group justify="flex-end"><Button variant="default" onClick={() => setCourseModal(false)}>Cancelar</Button><Button onClick={handleCreateCourse} disabled={!name.trim()}>Crear curso</Button></Group></Stack></Modal>
