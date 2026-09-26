@@ -114,6 +114,28 @@ Build all configured installers for the current operating system:
 pnpm tauri build
 ```
 
+## Publish a release
+
+The repository includes `.github/workflows/release.yml`. It builds macOS Apple Silicon and Windows installers in parallel and uploads them to a draft GitHub Release.
+
+Create and push a version tag:
+
+```bash
+cd /Users/zodiako/DEV/NOTAZOD
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Or run the workflow manually from **GitHub → Actions → Release NOTAZOD → Run workflow** and provide a tag such as `v0.1.0`.
+
+The workflow publishes:
+
+- macOS Apple Silicon `.dmg`.
+- Windows `.msi`.
+- Windows NSIS `.exe`.
+
+The release is created as a draft so the maintainer can verify the artifacts before making them public.
+
 ## Release checklist
 
 - [ ] Update the version in `app/package.json` and `app/src-tauri/tauri.conf.json`.

@@ -1,0 +1,86 @@
+name: Release NOTAZOD
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (for example v0.1.0)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: 22
+
+jobs:
+  release:
+    name: Build ${{ matrix.platform }} installer
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS Apple Silicon
+            runner: macos-14
+            bundles: dmg
+          - platform: Windows
+            runner: windows-latest
+            bundles: nsis,msi
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Build installer and publish release asset
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app
+          tagName: ${{ steps.release.outputs.tag }}
+          releaseName: NOTAZOD ${{ steps.release.outputs.tag }}
+          releaseBody: |
+            NOTAZOD desktop release.
+
+            Download the installer for your operating system:
+            - macOS Apple Silicon: `.dmg`
+            - Windows: `.msi` or `.exe`
+          releaseDraft: true
+          prerelease: false
+          args: --bundles ${{ matrix.bundles }}
