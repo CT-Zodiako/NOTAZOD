@@ -1,0 +1,639 @@
+{
+  "$description": "Design tokens in W3C DTCG format. Layers: primitive -> semantic -> component. UI consumes semantic/component only.",
+  "primitive": {
+    "color": {
+      "neutral": {
+        "0": {
+          "$type": "color",
+          "$value": "#FFFFFF"
+        },
+        "100": {
+          "$type": "color",
+          "$value": "#EEF1F5"
+        },
+        "200": {
+          "$type": "color",
+          "$value": "#DDE2EA",
+          "$description": "Hairlines."
+        },
+        "500": {
+          "$type": "color",
+          "$value": "#667085"
+        },
+        "900": {
+          "$type": "color",
+          "$value": "#20242D"
+        }
+      },
+      "brand": {
+        "$description": "Wine red (primary brand).",
+        "500": {
+          "$type": "color",
+          "$value": "#8C3F5B"
+        },
+        "600": {
+          "$type": "color",
+          "$value": "#713249"
+        }
+      },
+      "gold": {
+        "$description": "Gold (secondary brand). 500 is decorative only (2.4:1 on white, never for text).",
+        "100": {
+          "$type": "color",
+          "$value": "#FDF6E3"
+        },
+        "500": {
+          "$type": "color",
+          "$value": "#C9A227"
+        },
+        "700": {
+          "$type": "color",
+          "$value": "#7D620A"
+        }
+      },
+      "red": {
+        "600": {
+          "$type": "color",
+          "$value": "#C42B30",
+          "$description": "Coral red, brighter and warmer than brand wine"
+        }
+      },
+      "green": {
+        "600": {
+          "$type": "color",
+          "$value": "#237A35"
+        }
+      },
+      "amber": {
+        "600": {
+          "$type": "color",
+          "$value": "#B45309",
+          "$description": "General warnings only; not used for grade status (too close to gold)"
+        }
+      },
+      "violet": {
+        "600": {
+          "$type": "color",
+          "$value": "#7C3AED"
+        }
+      },
+      "slate": {
+        "600": {
+          "$type": "color",
+          "$value": "#475F7A"
+        }
+      }
+    },
+    "space": {
+      "1": {
+        "$type": "dimension",
+        "$value": "4px"
+      },
+      "2": {
+        "$type": "dimension",
+        "$value": "8px"
+      },
+      "3": {
+        "$type": "dimension",
+        "$value": "12px"
+      },
+      "4": {
+        "$type": "dimension",
+        "$value": "16px"
+      },
+      "6": {
+        "$type": "dimension",
+        "$value": "24px"
+      },
+      "8": {
+        "$type": "dimension",
+        "$value": "32px"
+      }
+    },
+    "font": {
+      "family": {
+        "base": {
+          "$type": "fontFamily",
+          "$value": [
+            "Nunito",
+            "sans-serif"
+          ],
+          "$description": "Rounded, friendly. Default digits are tabular (all 0-9 same advance width, verified in the font file); grade columns align without extra features. Must be bundled locally (offline app)."
+        }
+      },
+      "size": {
+        "xs": {
+          "$type": "dimension",
+          "$value": "13px"
+        },
+        "sm": {
+          "$type": "dimension",
+          "$value": "14px"
+        },
+        "md": {
+          "$type": "dimension",
+          "$value": "16px"
+        },
+        "lg": {
+          "$type": "dimension",
+          "$value": "20px"
+        },
+        "xl": {
+          "$type": "dimension",
+          "$value": "24px"
+        },
+        "2xl": {
+          "$type": "dimension",
+          "$value": "32px"
+        }
+      },
+      "weight": {
+        "regular": {
+          "$type": "fontWeight",
+          "$value": 400
+        },
+        "medium": {
+          "$type": "fontWeight",
+          "$value": 500
+        },
+        "bold": {
+          "$type": "fontWeight",
+          "$value": 700
+        }
+      },
+      "lineHeight": {
+        "base": {
+          "$type": "number",
+          "$value": 1.4,
+          "$description": "Proposed in IMPLEMENT, confirm."
+        },
+        "tight": {
+          "$type": "number",
+          "$value": 1.25,
+          "$description": "Headings."
+        }
+      }
+    },
+    "radius": {
+      "none": {
+        "$type": "dimension",
+        "$value": "0px",
+        "$description": "Table cells"
+      },
+      "sm": {
+        "$type": "dimension",
+        "$value": "6px",
+        "$description": "Buttons, inputs, chips"
+      },
+      "md": {
+        "$type": "dimension",
+        "$value": "8px",
+        "$description": "Modals, cards, table container"
+      },
+      "full": {
+        "$type": "dimension",
+        "$value": "9999px"
+      }
+    },
+    "borderWidth": {
+      "thin": {
+        "$type": "dimension",
+        "$value": "1px",
+        "$description": "Proposed in IMPLEMENT, confirm."
+      },
+      "focus": {
+        "$type": "dimension",
+        "$value": "2px",
+        "$description": "Focus ring."
+      }
+    },
+    "duration": {
+      "$description": "Subtle motion only (modal open, student change in walk-through). Reduced-motion preference sets all durations to 0. Never delays input: typing is accepted during transitions (confirmed, K6).",
+      "fast": {
+        "$type": "duration",
+        "$value": "120ms"
+      },
+      "base": {
+        "$type": "duration",
+        "$value": "200ms"
+      }
+    }
+  },
+  "semantic": {
+    "color": {
+      "text": {
+        "default": {
+          "$type": "color",
+          "$value": "{primitive.color.neutral.900}"
+        },
+        "muted": {
+          "$type": "color",
+          "$value": "{primitive.color.neutral.500}"
+        },
+        "onPrimary": {
+          "$type": "color",
+          "$value": "{primitive.color.neutral.0}",
+          "$description": "Label on primary/danger buttons (8.9:1 light, 6.4:1 dark)."
+        }
+      },
+      "surface": {
+        "default": {
+          "$type": "color",
+          "$value": "{primitive.color.neutral.0}"
+        },
+        "subtle": {
+          "$type": "color",
+          "$value": "{primitive.color.neutral.100}"
+        },
+        "raised": {
+          "$type": "color",
+          "$value": "{primitive.color.neutral.0}",
+          "$description": "Modals, popovers."
+        },
+        "overlay": {
+          "$type": "color",
+          "$value": "#18181B80",
+          "$description": "Modal backdrop."
+        }
+      },
+      "action": {
+        "primary": {
+          "$type": "color",
+          "$value": "{primitive.color.brand.500}"
+        },
+        "primaryHover": {
+          "$type": "color",
+          "$value": "{primitive.color.brand.600}"
+        }
+      },
+      "border": {
+        "default": {
+          "$type": "color",
+          "$value": "{primitive.color.neutral.500}"
+        },
+        "focus": {
+          "$type": "color",
+          "$value": "{primitive.color.brand.500}"
+        },
+        "subtle": {
+          "$type": "color",
+          "$value": "{primitive.color.neutral.200}",
+          "$description": "Table grid lines, dividers (decorative, no contrast requirement)."
+        }
+      },
+      "feedback": {
+        "error": {
+          "$type": "color",
+          "$value": "{primitive.color.red.600}"
+        },
+        "success": {
+          "$type": "color",
+          "$value": "{primitive.color.green.600}"
+        },
+        "warning": {
+          "$type": "color",
+          "$value": "{primitive.color.amber.600}"
+        }
+      },
+      "grade": {
+        "$description": "Grade status encoding (K7). Every status pairs color with icon/text and is explained in the legend. Neutral is reserved for 'nothing here'. Must pass contrast in light and dark modes. Light values verified >= 4.5:1 on white and on computedSurface. Dark values in semanticDark.",
+        "failing": {
+          "$type": "color",
+          "$value": "{primitive.color.red.600}",
+          "$description": "Below 3,0 (coral red) + alert icon"
+        },
+        "pending": {
+          "$type": "color",
+          "$value": "{primitive.color.violet.600}",
+          "$description": "Skipped 0,0 + clock icon + 'pending' text (violet, moved off amber to avoid gold)"
+        },
+        "passing": {
+          "$type": "color",
+          "$value": "{primitive.color.green.600}",
+          "$description": "3,0 or more; text color on period (locked only), accumulated, final grades"
+        },
+        "inProgress": {
+          "$type": "color",
+          "$value": "{semantic.color.text.muted}",
+          "$description": "Period grade of the active period: neutral, no pass/fail color"
+        },
+        "computedSurface": {
+          "$type": "color",
+          "$value": "{primitive.color.gold.100}",
+          "$description": "Background of computed read-only cells (very soft gold tint; wine tint rejected: pink reads as failing)"
+        },
+        "locked": {
+          "$type": "color",
+          "$value": "{primitive.color.slate.600}",
+          "$description": "Locked period (slate blue) + lock icon"
+        },
+        "empty": {
+          "$type": "color",
+          "$value": "{primitive.color.neutral.500}",
+          "$description": "Untouched cell, shown as a dash"
+        }
+      }
+    },
+    "shadow": {
+      "overlay": {
+        "$type": "shadow",
+        "$value": {
+          "color": "#18181B33",
+          "offsetX": "0px",
+          "offsetY": "8px",
+          "blur": "24px",
+          "spread": "0px"
+        },
+        "$description": "Modals, popovers, toasts."
+      }
+    },
+    "opacity": {
+      "disabled": {
+        "$type": "number",
+        "$value": 0.55,
+        "$description": "Disabled controls (WCAG exempts inactive controls from contrast)."
+      }
+    }
+  },
+  "semanticDark": {
+    "$description": "Dark mode overrides of semantic.color (same keys). Unlisted keys keep light values. Verified: all text colors >= 4.5:1 on surface.default and grade.computedSurface.",
+    "color": {
+      "text": {
+        "default": {
+          "$type": "color",
+          "$value": "#F3F0F2"
+        },
+        "muted": {
+          "$type": "color",
+          "$value": "#A9B1BF"
+        },
+        "onPrimary": {
+          "$type": "color",
+          "$value": "#FFFFFF"
+        }
+      },
+      "surface": {
+        "default": {
+          "$type": "color",
+          "$value": "#12161D"
+        },
+        "subtle": {
+          "$type": "color",
+          "$value": "#1A202A"
+        },
+        "raised": {
+          "$type": "color",
+          "$value": "#232B38"
+        },
+        "overlay": {
+          "$type": "color",
+          "$value": "#000000A6"
+        }
+      },
+      "action": {
+        "primary": {
+          "$type": "color",
+          "$value": "#C46A87",
+          "$description": "Muted rose accent for dark professional theme"
+        },
+        "primaryHover": {
+          "$type": "color",
+          "$value": "#D1849D"
+        }
+      },
+      "border": {
+        "default": {
+          "$type": "color",
+          "$value": "#71717A",
+          "$description": "Was #52525B (2.3:1, fails WCAG 1.4.11 3:1 for input borders); #71717A = 3.7:1."
+        },
+        "focus": {
+          "$type": "color",
+          "$value": "#E3C35A",
+          "$description": "Gold, not wine: light wine reads like failing coral on dark"
+        },
+        "subtle": {
+          "$type": "color",
+          "$value": "#2E2E33"
+        }
+      },
+      "grade": {
+        "failing": {
+          "$type": "color",
+          "$value": "#FF7A7A"
+        },
+        "pending": {
+          "$type": "color",
+          "$value": "#B794F6"
+        },
+        "passing": {
+          "$type": "color",
+          "$value": "#5FCB7A"
+        },
+        "computedSurface": {
+          "$type": "color",
+          "$value": "#2B2616"
+        },
+        "locked": {
+          "$type": "color",
+          "$value": "#9DB3CC"
+        },
+        "empty": {
+          "$type": "color",
+          "$value": "#A1A1AA"
+        }
+      },
+      "feedback": {
+        "error": {
+          "$type": "color",
+          "$value": "#FF7A7A",
+          "$description": "Was unlisted (light value ~3:1 on dark, fails 4.5:1)."
+        },
+        "success": {
+          "$type": "color",
+          "$value": "#5FCB7A"
+        },
+        "warning": {
+          "$type": "color",
+          "$value": "#F59E0B"
+        }
+      }
+    }
+  },
+  "component": {
+    "table": {
+      "$description": "Compact density. Reference viewport 1920x1080 at 100% fits 35 rows of 24px (~880px available once period tabs, search box, and legend share one toolbar); smaller viewports scroll with sticky header and fixed student column; text never shrinks.",
+      "rowHeight": {
+        "$type": "dimension",
+        "$value": "24px",
+        "$description": "Minimum click target (WCAG 2.2 target size). Raised from 22px in phase 4."
+      },
+      "fontSize": {
+        "$type": "dimension",
+        "$value": "{primitive.font.size.xs}"
+      },
+      "cellPaddingX": {
+        "$type": "dimension",
+        "$value": "{primitive.space.2}"
+      },
+      "nameColumnWidth": {
+        "$type": "dimension",
+        "$value": "280px",
+        "$description": "Proposed in IMPLEMENT, confirm."
+      },
+      "codeColumnWidth": {
+        "$type": "dimension",
+        "$value": "104px",
+        "$description": "Proposed in IMPLEMENT, confirm."
+      },
+      "gradeColumnWidth": {
+        "$type": "dimension",
+        "$value": "72px",
+        "$description": "Proposed in IMPLEMENT, confirm."
+      }
+    },
+    "button": {
+      "height": {
+        "$type": "dimension",
+        "$value": "32px",
+        "$description": "C4 (confirmed)"
+      },
+      "radius": {
+        "$type": "dimension",
+        "$value": "{primitive.radius.sm}"
+      }
+    },
+    "iconButton": {
+      "size": {
+        "$type": "dimension",
+        "$value": "32px",
+        "$description": "C4 (confirmed)"
+      }
+    },
+    "input": {
+      "height": {
+        "md": {
+          "$type": "dimension",
+          "$value": "44px"
+        }
+      },
+      "paddingX": {
+        "$type": "dimension",
+        "$value": "{primitive.space.3}"
+      },
+      "radius": {
+        "$type": "dimension",
+        "$value": "{primitive.radius.sm}",
+        "$description": "Was radius.md; K5 says controls use sm (6px). Template leftover fixed in IMPLEMENT."
+      },
+      "border": {
+        "$type": "color",
+        "$value": "{semantic.color.border.default}"
+      },
+      "borderFocus": {
+        "$type": "color",
+        "$value": "{semantic.color.border.focus}"
+      },
+      "borderError": {
+        "$type": "color",
+        "$value": "{semantic.color.feedback.error}"
+      }
+    },
+    "header": {
+      "height": {
+        "$type": "dimension",
+        "$value": "40px",
+        "$description": "Single thin row (C4)."
+      }
+    },
+    "tooltip": {
+      "delay": {
+        "$type": "duration",
+        "$value": "300ms",
+        "$description": "C4 (confirmed)"
+      },
+      "maxWidth": {
+        "$type": "dimension",
+        "$value": "336px",
+        "$description": "Proposed in IMPLEMENT, confirm."
+      }
+    },
+    "toast": {
+      "duration": {
+        "$type": "duration",
+        "$value": "3000ms",
+        "$description": "C4 (confirmed)"
+      }
+    },
+    "gradeInput": {
+      "width": {
+        "$type": "dimension",
+        "$value": "108px",
+        "$description": "Grade fields in student modal and forms."
+      },
+      "heightLg": {
+        "$type": "dimension",
+        "$value": "72px",
+        "$description": "Walk-through grade field, large and centered (C4)."
+      }
+    }
+  },
+  "icon": {
+    "$description": "Outline, rounded caps and joins (C5). Status icons always paired with color.",
+    "size": {
+      "sm": {
+        "$type": "dimension",
+        "$value": "16px",
+        "$description": "Table cells, buttons, badges"
+      },
+      "md": {
+        "$type": "dimension",
+        "$value": "20px",
+        "$description": "Header, empty states"
+      }
+    },
+    "stroke": {
+      "$type": "dimension",
+      "$value": "2px"
+    }
+  },
+  "layout": {
+    "homeMaxWidth": {
+      "$type": "dimension",
+      "$value": "960px"
+    },
+    "modalWidth": {
+      "$type": "dimension",
+      "$value": "480px"
+    },
+    "walkthroughWidth": {
+      "$type": "dimension",
+      "$value": "560px"
+    },
+    "pagePadding": {
+      "$type": "dimension",
+      "$value": "{primitive.space.6}"
+    }
+  },
+  "viewport": {
+    "reference": {
+      "$type": "dimension",
+      "$value": "1920x1080",
+      "$description": "Design reference at 100% scaling. Minimum device: 13-inch laptop."
+    }
+  },
+  "breakpoint": {
+    "sm": {
+      "$type": "dimension",
+      "$value": "640px"
+    },
+    "md": {
+      "$type": "dimension",
+      "$value": "768px"
+    },
+    "lg": {
+      "$type": "dimension",
+      "$value": "1024px"
+    }
+  }
+}

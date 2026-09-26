@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NOTAZOD</title>
+  <script>
+    // Apply the remembered color mode before first paint (follows the OS when unset).
+    try { const t = localStorage.getItem("notazod-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="app-header">
+    <nav class="breadcrumb" aria-label="Ruta">
+      <a class="brand" href="#/">NOTAZOD</a>
+      <span id="crumbs"></span>
+    </nav>
+    <button id="theme-toggle" class="icon-button" type="button"></button>
+  </header>
+  <main id="view"></main>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

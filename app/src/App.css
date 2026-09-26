@@ -1,0 +1,44 @@
+@font-face {
+  font-family: "Nunito";
+  src: url("/fonts/Nunito.ttf") format("truetype");
+  font-weight: 200 1000;
+  font-display: swap;
+}
+
+:root {
+  color: var(--color-text-default);
+  background: var(--color-surface-default);
+  font-family: var(--font-family-base);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+html, body, #root { min-height: 100%; }
+body { margin: 0; min-width: 320px; background: var(--color-surface-default); color: var(--color-text-default); }
+.mantine-AppShell-main { background: var(--color-surface-default); }
+.mantine-Card-root, .mantine-Modal-content { background: var(--color-surface-raised); border-color: var(--color-border-subtle); }
+.mantine-Table-table { background: var(--color-surface-raised); }
+.grade-table { font-size: var(--component-table-fontSize); }
+.grade-table th, .grade-table td { padding: 6px var(--component-table-cellPaddingX); white-space: nowrap; }
+.grade-table .student-name-cell { min-width: var(--component-table-nameColumnWidth); }
+.grade-table th { font-weight: var(--font-weight-bold); }
+.mantine-Table-thead { background: var(--color-surface-subtle); }
+.mantine-Table-tr:hover { background: var(--color-surface-subtle); }
+.grade-cell { cursor: pointer; }
+.shortcut { display: inline-block; margin-left: var(--space-2); opacity: 0.78; font-size: var(--font-size-xs); font-weight: var(--font-weight-regular); }
+.student-name-cell { cursor: pointer; font-weight: var(--font-weight-medium); }
+.student-name-cell:hover { color: var(--color-action-primary); }
+.editable-header { cursor: pointer; }
+.editable-header:hover { color: var(--color-action-primary); }
+.grade-cell:hover { background: var(--color-grade-computedSurface); }
+.mantine-Button-root { font-weight: var(--font-weight-medium); }
+:root[data-mantine-color-scheme="dark"] .app-header { background: var(--color-surface-raised); }
+:root[data-mantine-color-scheme="dark"] .course-card:hover { box-shadow: var(--shadow-overlay); }
+button, input { font: inherit; }
+.app-header { border-bottom: var(--borderWidth-thin) solid var(--color-border-subtle); background: var(--color-surface-default); }
+.header-inner { height: 100%; display: flex; align-items: center; justify-content: space-between; }
+.reminder-strip { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--color-surface-subtle); }
+.course-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--space-4); }
+.course-card { transition: transform var(--duration-fast), border-color var(--duration-fast); }
+.course-card:hover { transform: translateY(-2px); border-color: var(--color-action-primary); }
+@media (prefers-reduced-motion: reduce) { .course-card { transition: none; } }

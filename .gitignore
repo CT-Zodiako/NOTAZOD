@@ -1,0 +1,18 @@
+# Dependencies
+app/node_modules/
+
+# Build output
+app/dist/
+app/src-tauri/target/
+
+# Local databases and environment files
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.*
+
+# OS/editor files
+.DS_Store
+.vscode/
+.idea/
