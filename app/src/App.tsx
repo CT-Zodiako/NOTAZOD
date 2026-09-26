@@ -558,8 +558,7 @@ function App() {
       <AppShell.Header className="app-header">
         <Container size="xl" fluid className="header-inner">
           <Group gap="xs">
-            <img className="brand-logo" src="/branding/notazod-logo.png" alt="" aria-hidden="true" onError={(event) => { event.currentTarget.style.display = "none"; }} />
-            <Text fw={700} c="brand.5">NOTAZOD</Text>
+            <img className="brand-logo" src="/branding/notazod-logo.png" alt="NOTAZOD" />
           </Group>
           <Group gap="xs">
             <Button variant="subtle" size="xs" onClick={() => void openUrl("https://github.com/CT-Zodiako/NOTAZOD")} aria-label="Abrir repositorio de NOTAZOD en GitHub">GitHub</Button>

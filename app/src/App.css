@@ -37,7 +37,7 @@ body { margin: 0; min-width: 320px; background: var(--color-surface-default); co
 button, input { font: inherit; }
 .app-header { border-bottom: var(--borderWidth-thin) solid var(--color-border-subtle); background: var(--color-surface-default); }
 .header-inner { height: 100%; display: flex; align-items: center; justify-content: space-between; }
-.brand-logo { width: 28px; height: 28px; object-fit: contain; border-radius: var(--radius-sm); }
+.brand-logo { width: 132px; height: 36px; object-fit: contain; object-position: left center; }
 .app-footer { display: flex; align-items: center; justify-content: center; gap: var(--space-2); padding: var(--space-4) var(--space-5); border-top: var(--borderWidth-thin) solid var(--color-border-subtle); }
 .reminder-strip { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--color-surface-subtle); }
 .course-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--space-4); }

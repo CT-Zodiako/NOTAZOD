@@ -8,10 +8,12 @@ notazod-logo.png
 
 Recommended source: a square PNG, at least 1024 × 1024 px, with transparent background if appropriate.
 
-This file is used in the application header. To regenerate the native macOS/Windows icons from the same image, run from `app/`:
+`notazod-logo.png` is the wide logo used in the application header. The square `notazod-app-icon.png` is the adapted source for the macOS/Windows application icon.
+
+To regenerate the native icons after changing the source, run from `app/`:
 
 ```bash
-pnpm tauri icon public/branding/notazod-logo.png
+pnpm tauri icon public/branding/notazod-app-icon.png
 ```
 
-The command updates `src-tauri/icons/`. Commit those generated files together with the source image.
+The command updates `src-tauri/icons/`. Commit those generated files together with both source images.
