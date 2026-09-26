@@ -14,7 +14,7 @@ Allow NOTAZOD to detect and install signed releases from GitHub Releases.
 - [x] Add updater endpoint/public-key configuration.
 - [x] Add a UI action to check, download, and install an update.
 - [x] Update release workflow to create signed updater artifacts and publish `latest.json`.
-- [ ] Generate/configure signing key outside Git and document required GitHub secrets. *(Maintainer action — see below.)*
+- [x] Generate/configure signing key outside Git and document required GitHub secrets. *(GitHub Secrets still need to be added.)*
 - [x] Verify frontend/native builds (`pnpm build`, `cargo check`).
 
 ## Implementation notes
@@ -34,10 +34,10 @@ Allow NOTAZOD to detect and install signed releases from GitHub Releases.
 
    Keep `~/.tauri/notazod-updater.key` private. Never commit it.
 
-2. Copy the printed **public** key into `app/src-tauri/tauri.conf.json` at
-   `plugins.updater.pubkey`, replacing the literal placeholder
-   `PLACEHOLDER_REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY`. Builds cannot verify
-   updates until this is replaced.
+2. Copy the generated **public** key into `app/src-tauri/tauri.conf.json` at
+   `plugins.updater.pubkey`. The current repository configuration now contains the
+   generated public key. Builds cannot verify updates until this key remains paired
+   with the private key stored in GitHub Secrets.
 
 3. Add these GitHub repository secrets:
 
