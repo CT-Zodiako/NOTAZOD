@@ -23,8 +23,12 @@ export type Grade = { studentId: string; itemId: string; value: number; pending:
 
 let connection: Database | null = null;
 
+function resolveDatabaseName() {
+  return import.meta.env.VITE_NOTAZOD_DB_NAME || "notazod-dev.db";
+}
+
 async function getDatabase() {
-  connection ??= await Database.load("sqlite:notazod.db");
+  connection ??= await Database.load(`sqlite:${resolveDatabaseName()}`);
   return connection;
 }
 

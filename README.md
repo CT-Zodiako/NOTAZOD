@@ -59,6 +59,10 @@ Build the frontend:
 pnpm build
 ```
 
+### Database file and branch isolation
+
+Git branches isolate code, not runtime data. NOTAZOD opens the SQLite database named by `VITE_NOTAZOD_DB_NAME` (see `app/.env.example`). It defaults to `notazod-dev.db` when unset, so local development never touches the production database. Production builds must explicitly set `VITE_NOTAZOD_DB_NAME=notazod.db`. See [docs/INSTALLATION.md](docs/INSTALLATION.md#branches-do-not-isolate-data) for details.
+
 Build the native macOS application:
 
 ```bash

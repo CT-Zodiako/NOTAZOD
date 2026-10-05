@@ -66,6 +66,17 @@ NOTAZOD stores data locally in SQLite through the Tauri SQL plugin. The exact ap
 
 A guided backup/restore flow is outside V1.
 
+### Branches do not isolate data
+
+Git branches only separate code. They do not separate the SQLite database file on disk. Switching branches in the same working copy still points at the same database unless the database filename itself changes.
+
+NOTAZOD selects the database filename from the `VITE_NOTAZOD_DB_NAME` environment variable (see `app/.env.example`):
+
+- Unset (local development default): `notazod-dev.db`.
+- Production release build: must explicitly set `VITE_NOTAZOD_DB_NAME=notazod.db`.
+
+This keeps development work, including work done on feature branches, out of the production database file.
+
 ## Developer setup
 
 ### Requirements
@@ -139,6 +150,7 @@ The release is created as a draft so the maintainer can verify the artifacts bef
 ## Release checklist
 
 - [ ] Update the version in `app/package.json` and `app/src-tauri/tauri.conf.json`.
+- [ ] Confirm the production build sets `VITE_NOTAZOD_DB_NAME=notazod.db`.
 - [ ] Run `pnpm build`.
 - [ ] Run `cargo check --manifest-path src-tauri/Cargo.toml`.
 - [ ] Build the macOS `.app` and `.dmg` artifacts.

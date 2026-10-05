@@ -11,6 +11,8 @@ app/src-tauri/target/
 *.db-wal
 .env
 .env.*
+!.env.example
+!app/.env.example
 
 # OS/editor files
 .DS_Store
