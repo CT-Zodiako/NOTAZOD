@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { check, Update } from "@tauri-apps/plugin-updater";
+import { save } from "@tauri-apps/plugin-dialog";
 import {
   AppShell,
   Badge,
@@ -24,7 +25,7 @@ import {
   Title,
   useMantineColorScheme,
 } from "@mantine/core";
-import { Course, createCourse, createGradeItem, createStudent, deleteCourse, Grade, GradeItem, initDatabase, listCourses, listGradeItems, listGrades, listPeriods, listStudents, Period, renameGradeItem, saveGrade, setPeriodClosed, Student, updatePeriod } from "./lib/db";
+import { Course, createCourse, createGradeItem, createStudent, deleteCourse, exportBackup, Grade, GradeItem, initDatabase, listCourses, listGradeItems, listGrades, listPeriods, listStudents, Period, renameGradeItem, saveGrade, setPeriodClosed, Student, updatePeriod } from "./lib/db";
 import { classifyStudentRows, hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
 
 const emptyStudent: StudentDraft = {
@@ -168,12 +169,28 @@ function App() {
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
   const [updateProgress, setUpdateProgress] = useState(0);
   const [updateError, setUpdateError] = useState("");
+  const [backupMessage, setBackupMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const guidedFields = ["Nombre completo", "Código", "Documento", "Correo institucional", "Correo personal"];
 
   useEffect(() => {
     initDatabase().then(() => listCourses()).then(setCourses).catch(() => setCourses([])).finally(() => setLoading(false));
     void checkForUpdates(false);
   }, []);
+
+  async function handleExportBackup() {
+    setBackupMessage(null);
+    try {
+      const destination = await save({
+        defaultPath: `notazod-backup-${new Date().toISOString().replace(/[:.]/g, "-")}.db`,
+        filters: [{ name: "Base de datos SQLite", extensions: ["db"] }],
+      });
+      if (!destination) return;
+      await exportBackup(destination);
+      setBackupMessage({ type: "success", text: "Copia de seguridad exportada correctamente." });
+    } catch {
+      setBackupMessage({ type: "error", text: "No se pudo exportar la copia de seguridad." });
+    }
+  }
 
   async function handleDeleteCourse() {
     if (!selectedCourse || deleteConfirmation.trim() !== selectedCourse.name) return;
@@ -617,6 +634,7 @@ function App() {
             <img className="brand-logo" src="/branding/notazod-logo.png" alt="NOTAZOD" />
           </Group>
           <Group gap="xs">
+            <Button variant="subtle" size="xs" onClick={() => void handleExportBackup()} aria-label="Exportar copia de seguridad de NOTAZOD">Exportar copia de seguridad</Button>
             <Button variant="subtle" size="xs" onClick={() => void checkForUpdates()} aria-label="Buscar actualizaciones de NOTAZOD">Buscar actualizaciones</Button>
             <Button variant="subtle" size="xs" onClick={() => void openUrl("https://github.com/CT-Zodiako/NOTAZOD")} aria-label="Abrir repositorio de NOTAZOD en GitHub">GitHub</Button>
             <Button variant="subtle" size="xs" onClick={() => setColorScheme(colorScheme === "dark" ? "light" : "dark")} aria-label="Cambiar tema">{colorScheme === "dark" ? "Tema claro" : "Tema oscuro"}</Button>
@@ -634,6 +652,7 @@ function App() {
               </Group>
             </Group>
             {error ? <Text c="red" role="alert">{error}</Text> : null}
+            {backupMessage ? <Text c={backupMessage.type === "success" ? "green" : "red"} role="status">{backupMessage.text}</Text> : null}
             {loading ? <Text c="dimmed">Cargando tus cursos…</Text> : null}
             {!selectedCourse ? (
               <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>

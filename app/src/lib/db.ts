@@ -1,4 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
+import { invoke } from "@tauri-apps/api/core";
 
 export type Course = {
   id: string;
@@ -115,13 +116,35 @@ export async function createCourse(name: string, semester: string): Promise<Cour
   return { id, name, semester, students: 0 };
 }
 
+async function resolveBackupPath(): Promise<string> {
+  return invoke<string>("resolve_backup_path");
+}
+
+async function createInternalBackup(db: Database) {
+  const backupPath = await resolveBackupPath();
+  await db.execute("VACUUM INTO $1", [backupPath]);
+}
+
+export async function exportBackup(destinationPath: string) {
+  const db = await getDatabase();
+  await db.execute("VACUUM INTO $1", [destinationPath]);
+}
+
 export async function deleteCourse(courseId: string) {
   const db = await getDatabase();
-  await db.execute("DELETE FROM grades WHERE item_id IN (SELECT id FROM grade_items WHERE course_id = $1)", [courseId]);
-  await db.execute("DELETE FROM grade_items WHERE course_id = $1", [courseId]);
-  await db.execute("DELETE FROM students WHERE course_id = $1", [courseId]);
-  await db.execute("DELETE FROM periods WHERE course_id = $1", [courseId]);
-  await db.execute("DELETE FROM courses WHERE id = $1", [courseId]);
+  await createInternalBackup(db);
+  await db.execute("BEGIN");
+  try {
+    await db.execute("DELETE FROM grades WHERE item_id IN (SELECT id FROM grade_items WHERE course_id = $1)", [courseId]);
+    await db.execute("DELETE FROM grade_items WHERE course_id = $1", [courseId]);
+    await db.execute("DELETE FROM students WHERE course_id = $1", [courseId]);
+    await db.execute("DELETE FROM periods WHERE course_id = $1", [courseId]);
+    await db.execute("DELETE FROM courses WHERE id = $1", [courseId]);
+    await db.execute("COMMIT");
+  } catch (error) {
+    await db.execute("ROLLBACK");
+    throw error;
+  }
 }
 
 export async function listStudents(courseId: string): Promise<Student[]> {

@@ -64,7 +64,17 @@ NOTAZOD stores data locally in SQLite through the Tauri SQL plugin. The exact ap
 - keep a copy of the local application data directory;
 - do not edit the SQLite database manually while NOTAZOD is running.
 
-A guided backup/restore flow is outside V1.
+#### Automatic internal backups
+
+Before a course is permanently deleted, NOTAZOD automatically creates a consistent snapshot of the whole database using SQLite `VACUUM INTO`. Snapshots are written to a `backups` subdirectory inside the OS application-data directory, with a timestamped, collision-safe filename. These internal backups protect against mistakes during a single destructive action; they are **not** a substitute for an offsite or external copy.
+
+#### Manual backup export
+
+Use the **Exportar copia de seguridad** button in the app header to create a snapshot at a destination you choose through the native save dialog. This also uses `VACUUM INTO`, so the exported file is a consistent, standalone copy of the database that can be opened independently.
+
+**Disaster recovery requires copying backups (automatic or exported) to another disk, drive, or cloud location.** Backups stored only on the same disk as the application data do not protect against disk failure, theft, or loss of the device.
+
+A guided restore flow is outside this slice.
 
 ### Branches do not isolate data
 
