@@ -64,4 +64,10 @@ Prevent development work from opening or mutating the production SQLite database
 - Blocker: `tauri build --config src-tauri/tauri.staging.conf.json` failed before compilation because the Rust crate `tauri-plugin-dialog` was pinned at `2.7.3` (`app/src-tauri/Cargo.lock`) while `@tauri-apps/plugin-dialog` resolved to `2.8.1` via the `^2` range in `app/package.json`, and Tauri CLI 2.11.5 rejects that JS/Rust version skew.
 - Fix: pinned `@tauri-apps/plugin-dialog` to the exact `2.7.3` in `app/package.json` and regenerated `app/pnpm-lock.yaml` via `pnpm install`. No Rust dependency or production runtime behavior changed.
 - Verification: `cd app && pnpm tauri build --config src-tauri/tauri.staging.conf.json --bundles app --debug` compiled `tauri-plugin-dialog v2.7.3` and finished, bundling `NOTAZOD Test.app` successfully.
-- Commit: `eaf2c8e` (`feat: add isolated staging build`).
+- Commit: `c02fab2` (`feat: add isolated staging build`).
+
+### Controlled production-data clone
+- Only copy after the production app is fully closed.
+- Keep the original production database untouched and create a separate staging database copy.
+- Verify the copied SQLite database before launching `NOTAZOD Test`.
+- Copy evidence (2026-10-05): production integrity `ok`, 4 courses, 80 students, 334 grades; staging copy integrity `ok` with matching counts. Previous staging data was preserved in a timestamped sibling backup, not deleted.
