@@ -87,6 +87,26 @@ NOTAZOD selects the database filename from the `VITE_NOTAZOD_DB_NAME` environmen
 
 This keeps development work, including work done on feature branches, out of the production database file.
 
+### Testing new features without touching the installed production app
+
+Use this procedure when you want to try a feature build while continuing to use the currently installed production NOTAZOD app for real course data.
+
+**NOTAZOD Test** is a separate staging build with its own application identifier (`com.notazod.desktop.test`), its own product name, and its own database file (`notazod-test.db`). It installs alongside the production app instead of replacing it, and its updater is disabled so it can never automatically pull or overwrite a production release.
+
+1. **Close the production NOTAZOD app completely** before doing anything else. Do not run production and staging against the same database at the same time.
+2. If you want test data to resemble your real courses, make a copy of the production database file from the OS application-data directory, or use the in-app **Exportar copia de seguridad** export. Place the copy somewhere outside the production application-data directory.
+3. **Never overwrite the original production database file.** Treat it as read-only during this procedure.
+4. Build and install NOTAZOD Test:
+   ```bash
+   cd app
+   pnpm build:staging
+   pnpm tauri:build:staging
+   ```
+   Install the resulting `NOTAZOD Test` bundle. It installs beside the production `NOTAZOD` app because it uses a different identifier and product name.
+5. Run **NOTAZOD Test** separately from production. It opens `notazod-test.db`, never `notazod.db`.
+6. Understand that **NOTAZOD Test does not automatically back up production data.** Existing installed production builds have no automatic export of their own database; only the manual steps above, or the in-app backup/export feature on a version that has it, produce a copy.
+7. This procedure does not restore or migrate test data back into production. Treat anything entered in NOTAZOD Test as disposable test data.
+
 ## Developer setup
 
 ### Requirements
@@ -160,7 +180,8 @@ The release is created as a draft so the maintainer can verify the artifacts bef
 ## Release checklist
 
 - [ ] Update the version in `app/package.json` and `app/src-tauri/tauri.conf.json`.
-- [ ] Confirm the production build sets `VITE_NOTAZOD_DB_NAME=notazod.db`.
+- [ ] Confirm the production build sets `VITE_NOTAZOD_DB_NAME=notazod.db` (the release workflow sets this explicitly).
+- [ ] Confirm `NOTAZOD Test` staging builds keep a distinct identifier, product name, and disabled updater.
 - [ ] Run `pnpm build`.
 - [ ] Run `cargo check --manifest-path src-tauri/Cargo.toml`.
 - [ ] Build the macOS `.app` and `.dmg` artifacts.

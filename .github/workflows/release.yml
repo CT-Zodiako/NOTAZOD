@@ -72,6 +72,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Explicit production database name; must never fall back to the dev default.
+          VITE_NOTAZOD_DB_NAME: notazod.db
           # Required to sign updater artifacts and publish `latest.json`.
           # Configure both as repository secrets; never commit the private key.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

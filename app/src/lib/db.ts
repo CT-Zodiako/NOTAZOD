@@ -25,6 +25,9 @@ export type Grade = { studentId: string; itemId: string; value: number; pending:
 let connection: Database | null = null;
 
 function resolveDatabaseName() {
+  if (import.meta.env.MODE === "staging") {
+    return "notazod-test.db";
+  }
   return import.meta.env.VITE_NOTAZOD_DB_NAME || "notazod-dev.db";
 }
 

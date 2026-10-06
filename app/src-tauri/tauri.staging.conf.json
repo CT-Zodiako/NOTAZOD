@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "NOTAZOD Test",
+  "identifier": "com.notazod.desktop.test",
+  "build": {
+    "beforeBuildCommand": "pnpm build:staging"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "NOTAZOD Test",
+        "width": 800,
+        "height": 600
+      }
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRBNTVEODE0MzU0NzQ4MkQKUldRdFNFYzFGTmhWU2s2NDA5eWFvZlNncFE2Mk8vYjRrQnNJUzZyTVlkaE83S1FVbmE2ejE3S28K"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": false,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
