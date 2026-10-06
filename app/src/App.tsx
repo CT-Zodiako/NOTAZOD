@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { check, Update } from "@tauri-apps/plugin-updater";
-import { save } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   AppShell,
   Badge,
@@ -25,7 +25,7 @@ import {
   Title,
   useMantineColorScheme,
 } from "@mantine/core";
-import { Course, createCourse, createGradeItem, createStudent, deleteCourse, exportBackup, Grade, GradeItem, initDatabase, listCourses, listGradeItems, listGrades, listPeriods, listStudents, Period, renameGradeItem, saveGrade, setPeriodClosed, Student, updatePeriod } from "./lib/db";
+import { Course, createCourse, createGradeItem, createStudent, deleteCourse, exportBackup, Grade, GradeItem, initDatabase, listCourses, listGradeItems, listGrades, listPeriods, listStudents, Period, renameGradeItem, saveGrade, setPeriodClosed, stageRestore, Student, updatePeriod } from "./lib/db";
 import { classifyStudentRows, hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
 
 const emptyStudent: StudentDraft = {
@@ -170,10 +170,25 @@ function App() {
   const [updateProgress, setUpdateProgress] = useState(0);
   const [updateError, setUpdateError] = useState("");
   const [backupMessage, setBackupMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [restoreMessage, setRestoreMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [fatalStartupError, setFatalStartupError] = useState<string | null>(null);
   const guidedFields = ["Nombre completo", "Código", "Documento", "Correo institucional", "Correo personal"];
 
   useEffect(() => {
-    initDatabase().then(() => listCourses()).then(setCourses).catch(() => setCourses([])).finally(() => setLoading(false));
+    initDatabase()
+      .then(() => listCourses())
+      .then(setCourses)
+      .catch((error) => {
+        const message = error && typeof error === "object" && "fatal" in error && (error as { fatal: boolean }).fatal
+          ? (error as { message: string }).message
+          : null;
+        if (message) {
+          setFatalStartupError(message);
+        } else {
+          setCourses([]);
+        }
+      })
+      .finally(() => setLoading(false));
     void checkForUpdates(false);
   }, []);
 
@@ -189,6 +204,22 @@ function App() {
       setBackupMessage({ type: "success", text: "Copia de seguridad exportada correctamente." });
     } catch {
       setBackupMessage({ type: "error", text: "No se pudo exportar la copia de seguridad." });
+    }
+  }
+
+  async function handleRestoreBackup() {
+    setRestoreMessage(null);
+    try {
+      const selected = await open({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "Base de datos SQLite", extensions: ["db"] }],
+      });
+      if (!selected || Array.isArray(selected)) return;
+      await stageRestore(selected);
+      setRestoreMessage({ type: "success", text: "Restauración pendiente. Cerrá y volvé a abrir NOTAZOD para aplicarla." });
+    } catch {
+      setRestoreMessage({ type: "error", text: "No se pudo preparar la restauración. Verificá que el archivo sea una base de datos SQLite válida." });
     }
   }
 
@@ -626,6 +657,24 @@ function App() {
     setGradeImportModal(false);
   }
 
+  if (fatalStartupError) {
+    return (
+      <Container size="sm" py="xl">
+        <Stack gap="md">
+          <Title order={2} c="red">No se pudo abrir NOTAZOD</Title>
+          <Text role="alert">
+            La restauración de la copia de seguridad falló y no se pudo confirmar que la base de datos activa quedara intacta.
+            Por seguridad, NOTAZOD no abrió ninguna base de datos para evitar crear una vacía.
+          </Text>
+          <Text size="sm" c="dimmed">{fatalStartupError}</Text>
+          <Text size="sm">
+            Contactá soporte técnico y conservá el archivo de respaldo mencionado arriba antes de intentar nada más.
+          </Text>
+        </Stack>
+      </Container>
+    );
+  }
+
   return (
     <AppShell header={{ height: 48 }} padding="md">
       <AppShell.Header className="app-header">
@@ -635,6 +684,7 @@ function App() {
           </Group>
           <Group gap="xs">
             <Button variant="subtle" size="xs" onClick={() => void handleExportBackup()} aria-label="Exportar copia de seguridad de NOTAZOD">Exportar copia de seguridad</Button>
+            <Button variant="subtle" size="xs" onClick={() => void handleRestoreBackup()} aria-label="Restaurar copia de seguridad de NOTAZOD">Restaurar copia de seguridad</Button>
             <Button variant="subtle" size="xs" onClick={() => void checkForUpdates()} aria-label="Buscar actualizaciones de NOTAZOD">Buscar actualizaciones</Button>
             <Button variant="subtle" size="xs" onClick={() => void openUrl("https://github.com/CT-Zodiako/NOTAZOD")} aria-label="Abrir repositorio de NOTAZOD en GitHub">GitHub</Button>
             <Button variant="subtle" size="xs" onClick={() => setColorScheme(colorScheme === "dark" ? "light" : "dark")} aria-label="Cambiar tema">{colorScheme === "dark" ? "Tema claro" : "Tema oscuro"}</Button>
@@ -653,6 +703,7 @@ function App() {
             </Group>
             {error ? <Text c="red" role="alert">{error}</Text> : null}
             {backupMessage ? <Text c={backupMessage.type === "success" ? "green" : "red"} role="status">{backupMessage.text}</Text> : null}
+            {restoreMessage ? <Text c={restoreMessage.type === "success" ? "green" : "red"} role="status">{restoreMessage.text}</Text> : null}
             {loading ? <Text c="dimmed">Cargando tus cursos…</Text> : null}
             {!selectedCourse ? (
               <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>

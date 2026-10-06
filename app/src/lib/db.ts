@@ -36,7 +36,33 @@ async function getDatabase() {
   return connection;
 }
 
+export type RestoreError = { fatal: boolean; message: string; backupPath?: string };
+
+function isRestoreError(error: unknown): error is RestoreError {
+  return typeof error === "object" && error !== null && "fatal" in error && "message" in error;
+}
+
+export async function stageRestore(sourcePath: string): Promise<void> {
+  await invoke("stage_restore", { dbName: resolveDatabaseName(), sourcePath });
+}
+
+export async function applyPendingRestore(): Promise<boolean> {
+  return invoke<boolean>("apply_pending_restore", { dbName: resolveDatabaseName() });
+}
+
+// A fatal restore failure means the active database file could not be confirmed
+// present after a rollback attempt. Opening the database layer in that state would
+// let SQLite silently create a new empty file in place of the lost data, so callers
+// must stop before `getDatabase()` and surface the error instead of swallowing it.
 export async function initDatabase() {
+  try {
+    await applyPendingRestore();
+  } catch (error) {
+    if (isRestoreError(error) && error.fatal) {
+      throw error;
+    }
+    console.error("Pending restore failed; current database kept active, pending restore retained for retry", error);
+  }
   const db = await getDatabase();
   await db.execute(`
     CREATE TABLE IF NOT EXISTS courses (

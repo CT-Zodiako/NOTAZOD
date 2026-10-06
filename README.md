@@ -126,7 +126,7 @@ NOTAZOD is offline-first. Course data is stored locally on the teacher's compute
 
 ## Current scope: V1
 
-V1 is frozen around the core teacher workflow: courses, students, guided clipboard import, activities, periods, calculations, editing, and exports. Future releases may add backup/restore, richer reports, signed installers, and automatic updates.
+V1 is frozen around the core teacher workflow: courses, students, guided clipboard import, activities, periods, calculations, editing, and exports. It also includes automatic/manual backups and a restart-based backup restore (see [docs/INSTALLATION.md](docs/INSTALLATION.md#restart-based-restore)). Future releases may add richer reports, signed installers, and automatic updates.
 
 ## License
 

@@ -74,7 +74,22 @@ Use the **Exportar copia de seguridad** button in the app header to create a sna
 
 **Disaster recovery requires copying backups (automatic or exported) to another disk, drive, or cloud location.** Backups stored only on the same disk as the application data do not protect against disk failure, theft, or loss of the device.
 
-A guided restore flow is outside this slice.
+#### Restart-based restore
+
+Use the **Restaurar copia de seguridad** button in the app header to restore a previously exported `.db` file. Restore is **restart-based**, not instant:
+
+1. You pick a single SQLite backup file through the native file-open dialog.
+2. NOTAZOD validates it is a regular file, checks the SQLite header, and checks the file length is a non-zero multiple of the page size declared in that header (this rejects empty and truncated files), then copies it into the app-data directory as a pending restore. The currently open database is **not** touched yet. This is **not a full SQLite integrity check** (for example, it does not run `PRAGMA integrity_check`); a file can pass this validation and still contain corrupted page data.
+3. The app tells you the restore is pending and asks you to close and reopen NOTAZOD.
+4. On the next launch, before the database opens, NOTAZOD moves the current database (and any `-wal`/`-shm` sidecar files) to a timestamped `*.before-restore-<timestamp>` backup, then installs the pending file as the active database.
+
+**Failure behavior:**
+
+- If installing the pending file fails and the rollback is confirmed (the active database file is present again, with any moved `-wal`/`-shm` sidecars restored), NOTAZOD keeps the pending restore staged for another attempt on the next launch and logs the failure to the console.
+- If the active database's presence cannot be confirmed after a rollback attempt for any reason — the pre-existing database could not be moved back into place, there was no pre-existing database and the pending install still failed, or a `-wal`/`-shm` sidecar rollback failed — NOTAZOD treats this as fatal: it refuses to open any database rather than risk SQLite silently creating a new empty one, and shows a blocking recovery screen. When a pre-restore backup exists, the screen names its path for manual recovery; when there was no pre-existing database, it says so and asks you to confirm the database file's presence manually. The pending restore is kept for retry in both cases.
+- NOTAZOD never silently deletes the pending restore file or the current/backup database files on any failure path.
+
+**Restore is intended only for the active, isolated installation you are running it from** (production restores into production, staging restores into staging). There is no migration path from a staging restore back into production. While testing on the `NOTAZOD Test` staging build, **do not select the production database file** (`notazod.db`) as the restore source — doing so copies production data into staging but never writes back, so it cannot corrupt production, though it does mix real and test data inside the staging profile.
 
 ### Branches do not isolate data
 
