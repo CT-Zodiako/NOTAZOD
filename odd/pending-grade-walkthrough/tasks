@@ -1,0 +1,10 @@
+# Pending-grade walkthrough — task mirror
+
+- [x] Preserve direct editing of an existing note.
+- [x] Refactor walkthrough navigation to use the activity's pending students.
+- [x] Preserve grade saving, empty-grade pending behavior, and modal boundaries.
+- [ ] Verify with focused manual checks in NOTAZOD Test.
+
+Builds passed and NOTAZOD Test was rebuilt/reinstalled. Direct editing and pending-only progression are implemented; manual behavior confirmation remains pending.
+
+Decision: start grading from the first pending student for the selected activity and skip completed students.

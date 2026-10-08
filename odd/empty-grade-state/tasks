@@ -1,0 +1,18 @@
+# Empty grade state tasks
+
+- [x] Add grade-row deletion/reset persistence.
+- [x] Add Ctrl+Enter handling and empty-state UI semantics.
+- [x] Preserve walkthrough navigation and calculation behavior intentionally.
+- [x] Add grading keyboard controls: `l` next, `h` previous, Escape close, autofocus note input.
+- [x] Make shortcuts modal-wide and visible in the grading hint.
+- [x] Keep grading buttons on one row and remove the bottom shortcut explanation line.
+- [x] Build and install NOTAZOD Test.
+- [ ] Manually verify the full empty-grade and keyboard flow in NOTAZOD Test.
+- [x] Fix walkthrough entry/advance to use a gradeable set (absent + explicit pending) instead of explicit-pending-only, and relabel the modal counter to `Por calificar`.
+
+## Verification
+- `npx tsc --noEmit` passed.
+- `npm run build` passed.
+- `pnpm tauri:build:staging` passed.
+- Latest bundle installed/opened at `/Applications/NOTAZOD Test.app` with bundle `com.notazod.desktop.test`.
+- Native review capture was blocked by invalid provider JSON; no review authority was consumed.

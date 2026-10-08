@@ -1,0 +1,13 @@
+# Grade history and contextual undo tasks
+
+- [x] Add idempotent grade history schema and persistence.
+- [x] Add contextual undo operation with closed-period guard.
+- [x] Add history/undo controls to grading UI.
+- [x] Build and install NOTAZOD Test.
+- [ ] Manually verify grade -> undo -> history and clear -> undo flows.
+
+## Verification
+- `npx tsc --noEmit` passed.
+- `pnpm tauri:build:staging` passed; only a non-blocking JS chunk-size warning.
+- Latest bundle installed/opened at `/Applications/NOTAZOD Test.app`, bundle `com.notazod.desktop.test`; process is running.
+- Native review capture was blocked by incomplete provider JSON; no review authority was consumed.

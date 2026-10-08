@@ -21,6 +21,20 @@ export type Student = {
 export type Period = { id: string; courseId: string; number: number; start: string; end: string; activityPercent: number; examPercent: number; closed: number };
 export type GradeItem = { id: string; courseId: string; periodId: string; name: string; isExam: number; sortOrder: number };
 export type Grade = { studentId: string; itemId: string; value: number; pending: number };
+export type GradeHistoryEntry = {
+  id: string;
+  studentId: string;
+  itemId: string;
+  previousValue: number | null;
+  previousPending: number | null;
+  newValue: number | null;
+  newPending: number | null;
+  action: "save" | "delete";
+  createdAt: string;
+  undone: number;
+};
+export type Group = { id: string; periodId: string; name: string; sortOrder: number };
+export type GroupMembership = { groupId: string; studentId: string };
 
 let connection: Database | null = null;
 
@@ -125,6 +139,39 @@ export async function initDatabase() {
       PRIMARY KEY (student_id, item_id)
     );
   `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS groups (
+      id TEXT PRIMARY KEY NOT NULL,
+      period_id TEXT NOT NULL REFERENCES periods(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(period_id, name)
+    );
+  `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS group_members (
+      period_id TEXT NOT NULL REFERENCES periods(id) ON DELETE CASCADE,
+      group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      PRIMARY KEY (period_id, student_id)
+    );
+  `);
+  await db.execute("CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members (group_id)");
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS grade_history (
+      id TEXT PRIMARY KEY NOT NULL,
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      item_id TEXT NOT NULL REFERENCES grade_items(id) ON DELETE CASCADE,
+      previous_value REAL,
+      previous_pending INTEGER,
+      new_value REAL,
+      new_pending INTEGER,
+      action TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      undone INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+  await db.execute("CREATE INDEX IF NOT EXISTS idx_grade_history_pair ON grade_history (student_id, item_id)");
 }
 
 export async function listCourses(): Promise<Course[]> {
@@ -266,10 +313,260 @@ export async function listGrades(courseId: string): Promise<Grade[]> {
   return db.select<Grade[]>("SELECT g.student_id AS studentId, g.item_id AS itemId, g.value, g.pending FROM grades g JOIN grade_items i ON i.id = g.item_id WHERE i.course_id = $1", [courseId]);
 }
 
+async function fetchGradeState(db: Database, studentId: string, itemId: string): Promise<{ value: number; pending: number } | null> {
+  const rows = await db.select<{ value: number; pending: number }[]>("SELECT value, pending FROM grades WHERE student_id = $1 AND item_id = $2", [studentId, itemId]);
+  return rows[0] ?? null;
+}
+
+async function recordGradeHistory(
+  db: Database,
+  studentId: string,
+  itemId: string,
+  previous: { value: number; pending: number } | null,
+  next: { value: number; pending: number } | null,
+  action: "save" | "delete"
+) {
+  await db.execute(
+    `INSERT INTO grade_history (id, student_id, item_id, previous_value, previous_pending, new_value, new_pending, action)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      crypto.randomUUID(),
+      studentId,
+      itemId,
+      previous?.value ?? null,
+      previous?.pending ?? null,
+      next?.value ?? null,
+      next?.pending ?? null,
+      action,
+    ]
+  );
+}
+
 export async function saveGrade(grade: Grade) {
   const db = await getDatabase();
   const period = await db.select<{ closed: number }[]>("SELECT p.closed FROM periods p JOIN grade_items i ON i.period_id = p.id WHERE i.id = $1", [grade.itemId]);
   if (period[0]?.closed) throw new Error("Period is closed");
+  const previous = await fetchGradeState(db, grade.studentId, grade.itemId);
   await db.execute(`INSERT INTO grades (student_id, item_id, value, pending) VALUES ($1, $2, $3, $4)
     ON CONFLICT(student_id, item_id) DO UPDATE SET value = excluded.value, pending = excluded.pending`, [grade.studentId, grade.itemId, grade.value, grade.pending]);
+  await recordGradeHistory(db, grade.studentId, grade.itemId, previous, { value: grade.value, pending: grade.pending }, "save");
+}
+
+export async function deleteGrade(studentId: string, itemId: string) {
+  const db = await getDatabase();
+  const period = await db.select<{ closed: number }[]>("SELECT p.closed FROM periods p JOIN grade_items i ON i.period_id = p.id WHERE i.id = $1", [itemId]);
+  if (period[0]?.closed) throw new Error("Period is closed");
+  const previous = await fetchGradeState(db, studentId, itemId);
+  await db.execute("DELETE FROM grades WHERE student_id = $1 AND item_id = $2", [studentId, itemId]);
+  await recordGradeHistory(db, studentId, itemId, previous, null, "delete");
+}
+
+export async function listGradeHistory(studentId: string, itemId: string): Promise<GradeHistoryEntry[]> {
+  const db = await getDatabase();
+  return db.select<GradeHistoryEntry[]>(
+    `SELECT id, student_id AS studentId, item_id AS itemId,
+       previous_value AS previousValue, previous_pending AS previousPending,
+       new_value AS newValue, new_pending AS newPending,
+       action, created_at AS createdAt, undone
+     FROM grade_history
+     WHERE student_id = $1 AND item_id = $2
+     ORDER BY rowid DESC`,
+    [studentId, itemId]
+  );
+}
+
+export async function undoLastGrade(studentId: string, itemId: string): Promise<Grade | null> {
+  const db = await getDatabase();
+  const period = await db.select<{ closed: number }[]>("SELECT p.closed FROM periods p JOIN grade_items i ON i.period_id = p.id WHERE i.id = $1", [itemId]);
+  if (period[0]?.closed) throw new Error("Period is closed");
+  const rows = await db.select<GradeHistoryEntry[]>(
+    `SELECT id, student_id AS studentId, item_id AS itemId,
+       previous_value AS previousValue, previous_pending AS previousPending,
+       new_value AS newValue, new_pending AS newPending,
+       action, created_at AS createdAt, undone
+     FROM grade_history
+     WHERE student_id = $1 AND item_id = $2 AND undone = 0
+     ORDER BY rowid DESC LIMIT 1`,
+    [studentId, itemId]
+  );
+  const entry = rows[0];
+  if (!entry) return null;
+  if (entry.previousValue === null || entry.previousPending === null) {
+    await db.execute("DELETE FROM grades WHERE student_id = $1 AND item_id = $2", [studentId, itemId]);
+  } else {
+    await db.execute(
+      `INSERT INTO grades (student_id, item_id, value, pending) VALUES ($1, $2, $3, $4)
+       ON CONFLICT(student_id, item_id) DO UPDATE SET value = excluded.value, pending = excluded.pending`,
+      [studentId, itemId, entry.previousValue, entry.previousPending]
+    );
+  }
+  await db.execute("UPDATE grade_history SET undone = 1 WHERE id = $1", [entry.id]);
+  if (entry.previousValue === null || entry.previousPending === null) return null;
+  return { studentId, itemId, value: entry.previousValue, pending: entry.previousPending };
+}
+
+async function assertPeriodOpen(db: Database, periodId: string) {
+  const period = await db.select<{ closed: number }[]>("SELECT closed FROM periods WHERE id = $1", [periodId]);
+  if (period[0]?.closed) throw new Error("Period is closed");
+}
+
+export async function listGroups(periodId: string): Promise<Group[]> {
+  const db = await getDatabase();
+  return db.select<Group[]>(
+    "SELECT id, period_id AS periodId, name, sort_order AS sortOrder FROM groups WHERE period_id = $1 ORDER BY sort_order, name COLLATE NOCASE",
+    [periodId]
+  );
+}
+
+export async function listGroupMemberships(periodId: string): Promise<GroupMembership[]> {
+  const db = await getDatabase();
+  return db.select<GroupMembership[]>(
+    "SELECT group_id AS groupId, student_id AS studentId FROM group_members WHERE period_id = $1",
+    [periodId]
+  );
+}
+
+export async function createGroup(periodId: string, name: string): Promise<Group> {
+  const db = await getDatabase();
+  await assertPeriodOpen(db, periodId);
+  const id = crypto.randomUUID();
+  const current = await db.select<{ sortOrder: number }[]>("SELECT COALESCE(MAX(sort_order), 0) AS sortOrder FROM groups WHERE period_id = $1", [periodId]);
+  const sortOrder = (current[0]?.sortOrder ?? 0) + 1;
+  await db.execute("INSERT INTO groups (id, period_id, name, sort_order) VALUES ($1, $2, $3, $4)", [id, periodId, name, sortOrder]);
+  return { id, periodId, name, sortOrder };
+}
+
+export async function renameGroup(groupId: string, name: string) {
+  const db = await getDatabase();
+  const group = await db.select<{ periodId: string }[]>("SELECT period_id AS periodId FROM groups WHERE id = $1", [groupId]);
+  if (!group[0]) throw new Error("Group not found");
+  await assertPeriodOpen(db, group[0].periodId);
+  await db.execute("UPDATE groups SET name = $1 WHERE id = $2", [name, groupId]);
+}
+
+export async function deleteGroup(groupId: string) {
+  const db = await getDatabase();
+  const group = await db.select<{ periodId: string }[]>("SELECT period_id AS periodId FROM groups WHERE id = $1", [groupId]);
+  if (!group[0]) throw new Error("Group not found");
+  await assertPeriodOpen(db, group[0].periodId);
+  await db.execute("BEGIN");
+  try {
+    await db.execute("DELETE FROM group_members WHERE group_id = $1", [groupId]);
+    await db.execute("DELETE FROM groups WHERE id = $1", [groupId]);
+    await db.execute("COMMIT");
+  } catch (error) {
+    await db.execute("ROLLBACK");
+    throw error;
+  }
+}
+
+export async function assignStudentToGroup(periodId: string, studentId: string, groupId: string | null) {
+  const db = await getDatabase();
+  await assertPeriodOpen(db, periodId);
+  const period = await db.select<{ courseId: string }[]>("SELECT course_id AS courseId FROM periods WHERE id = $1", [periodId]);
+  const student = await db.select<{ id: string }[]>("SELECT id FROM students WHERE id = $1 AND course_id = $2", [studentId, period[0]?.courseId]);
+  if (!period[0] || !student[0]) throw new Error("Student does not belong to this period");
+  if (groupId !== null) {
+    const group = await db.select<{ id: string }[]>("SELECT id FROM groups WHERE id = $1 AND period_id = $2", [groupId, periodId]);
+    if (!group[0]) throw new Error("Group does not belong to this period");
+  }
+  await db.execute("DELETE FROM group_members WHERE period_id = $1 AND student_id = $2", [periodId, studentId]);
+  if (groupId !== null) {
+    await db.execute("INSERT INTO group_members (period_id, group_id, student_id) VALUES ($1, $2, $3)", [periodId, groupId, studentId]);
+  }
+}
+
+export async function copyGroupsFromPeriod(sourcePeriodId: string, destinationPeriodId: string): Promise<{ groups: Group[]; memberships: GroupMembership[] }> {
+  if (sourcePeriodId === destinationPeriodId) throw new Error("Source and destination cutoffs must be different");
+  const db = await getDatabase();
+  const periods = await db.select<{ id: string; courseId: string }[]>(
+    "SELECT id, course_id AS courseId FROM periods WHERE id IN ($1, $2)",
+    [sourcePeriodId, destinationPeriodId]
+  );
+  const source = periods.find((p) => p.id === sourcePeriodId);
+  const destination = periods.find((p) => p.id === destinationPeriodId);
+  if (!source || !destination) throw new Error("Cutoff not found");
+  if (source.courseId !== destination.courseId) throw new Error("Cutoffs belong to different courses");
+  await assertPeriodOpen(db, destinationPeriodId);
+
+  const sourceGroups = await db.select<Group[]>(
+    "SELECT id, period_id AS periodId, name, sort_order AS sortOrder FROM groups WHERE period_id = $1 ORDER BY sort_order, name COLLATE NOCASE",
+    [sourcePeriodId]
+  );
+  const sourceMemberships = await db.select<GroupMembership[]>(
+    "SELECT group_id AS groupId, student_id AS studentId FROM group_members WHERE period_id = $1",
+    [sourcePeriodId]
+  );
+
+  await db.execute("DELETE FROM group_members WHERE period_id = $1", [destinationPeriodId]);
+  await db.execute("DELETE FROM groups WHERE period_id = $1", [destinationPeriodId]);
+
+  const idMap = new Map<string, string>();
+  const newGroups: Group[] = sourceGroups.map((group) => {
+    const newId = crypto.randomUUID();
+    idMap.set(group.id, newId);
+    return { id: newId, periodId: destinationPeriodId, name: group.name, sortOrder: group.sortOrder };
+  });
+
+  if (newGroups.length) {
+    const placeholders = newGroups.map((_, index) => `($${index * 4 + 1}, $${index * 4 + 2}, $${index * 4 + 3}, $${index * 4 + 4})`).join(", ");
+    const params = newGroups.flatMap((group) => [group.id, group.periodId, group.name, group.sortOrder]);
+    await db.execute(`INSERT INTO groups (id, period_id, name, sort_order) VALUES ${placeholders}`, params);
+  }
+
+  const candidateMemberships = sourceMemberships
+    .map((membership) => ({ groupId: idMap.get(membership.groupId), studentId: membership.studentId }))
+    .filter((membership): membership is { groupId: string; studentId: string } => !!membership.groupId);
+
+  let newMemberships: GroupMembership[] = [];
+  if (candidateMemberships.length) {
+    const candidateStudentIds = [...new Set(candidateMemberships.map((m) => m.studentId))];
+    const studentPlaceholders = candidateStudentIds.map((_, index) => `$${index + 2}`).join(", ");
+    const validStudents = await db.select<{ id: string }[]>(
+      `SELECT id FROM students WHERE course_id = $1 AND id IN (${studentPlaceholders})`,
+      [destination.courseId, ...candidateStudentIds]
+    );
+    const validStudentIds = new Set(validStudents.map((s) => s.id));
+    newMemberships = candidateMemberships.filter((m) => validStudentIds.has(m.studentId));
+
+    if (newMemberships.length) {
+      const memberPlaceholders = newMemberships.map((_, index) => `($${index * 3 + 1}, $${index * 3 + 2}, $${index * 3 + 3})`).join(", ");
+      const memberParams = newMemberships.flatMap((m) => [destinationPeriodId, m.groupId, m.studentId]);
+      await db.execute(`INSERT INTO group_members (period_id, group_id, student_id) VALUES ${memberPlaceholders}`, memberParams);
+    }
+  }
+
+  return { groups: newGroups, memberships: newMemberships };
+}
+
+export async function saveGroupGrade(groupId: string, itemId: string, value: number, pending: number): Promise<Grade[]> {
+  const db = await getDatabase();
+  const group = await db.select<{ periodId: string; closed: number }[]>(
+    "SELECT g.period_id AS periodId, p.closed AS closed FROM groups g JOIN periods p ON p.id = g.period_id WHERE g.id = $1",
+    [groupId]
+  );
+  const item = await db.select<{ periodId: string; closed: number }[]>(
+    "SELECT i.period_id AS periodId, p.closed AS closed FROM grade_items i JOIN periods p ON p.id = i.period_id WHERE i.id = $1",
+    [itemId]
+  );
+  if (!group[0] || !item[0]) throw new Error("Group or grade item not found");
+  if (group[0].periodId !== item[0].periodId) throw new Error("Group and grade item belong to different periods");
+  if (group[0].closed) throw new Error("Period is closed");
+
+  const members = await db.select<{ studentId: string }[]>(
+    "SELECT student_id AS studentId FROM group_members WHERE group_id = $1 AND period_id = $2",
+    [groupId, group[0].periodId]
+  );
+  if (!members.length) throw new Error("Group has no members");
+
+  const placeholders = members.map((_, index) => `($${index * 3 + 1}, $${index * 3 + 2}, $${index * 3 + 3}, $${members.length * 3 + 1})`).join(", ");
+  const params = members.flatMap((member) => [member.studentId, itemId, value]);
+  params.push(pending);
+  await db.execute(
+    `INSERT INTO grades (student_id, item_id, value, pending) VALUES ${placeholders}
+     ON CONFLICT(student_id, item_id) DO UPDATE SET value = excluded.value, pending = excluded.pending`,
+    params
+  );
+
+  return members.map((member) => ({ studentId: member.studentId, itemId, value, pending }));
 }

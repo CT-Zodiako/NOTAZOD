@@ -1,0 +1,17 @@
+# Student groups by period — task mirror
+
+- [x] Add safe per-period group schema, migration initialization, and CRUD.
+- [x] Add group management and selector-based membership assignment.
+- [x] Add list/group view toggle with unassigned students visible.
+- [x] Keep grouped view limited to names, codes, and organization controls.
+- [x] Keep all grading actions in list view.
+- [x] Use compact grouped rows to reduce wasted space.
+- [x] Filter the normal list by active-period group.
+- [x] Add normal-list group grading that updates individual rows.
+- [x] Redesign grouped view as a horizontal two-pane layout (unassigned students left, groups right).
+- [x] Auto-generate sequential default group names (`Grupo N`) from the highest existing `Grupo N`.
+- [x] Add cross-cutoff group copy (names + memberships) from the group management modal.
+- [x] Remove drag-and-drop from the grouped view; add a `Sacar del grupo` button beside each assigned student and render group cards in a two-column grid (`base: 1`, `md: 2`).
+- [ ] Verify persistence, individual overrides, pending navigation, and production isolation.
+
+Decisions: groups are optional and persisted per course period; list/group views are toggleable; membership uses a per-student `Mover a grupo…` selector (both for unassigned and assigned students) plus a `Sacar del grupo` button on assigned students; grouped view is organization-only except for the existing `Calificar grupo`/`Eliminar grupo` actions on each group card; list view filters by group and owns the main group-grade action, which updates individual rows. Grouped view layout is a horizontal two-pane split: left pane shows only unassigned students, right pane holds the create-group control and a responsive grid of group cards. Blank group names auto-generate the next sequential `Grupo N` based on the highest existing `Grupo N` suffix, not a running counter. Cross-cutoff group copy: the active cutoff's group management modal can copy another cutoff's groups (same course, destination open, active cutoff excluded as source); copying replaces both names and memberships and requires confirmation if the destination already has groups. Drag-and-drop was removed entirely (unreliable in the packaged app); the selector plus `Sacar del grupo` button are the supported assignment path, both respecting locked-cutoff state.

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { check, Update } from "@tauri-apps/plugin-updater";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -18,6 +18,7 @@ import {
   Select,
   SimpleGrid,
   Stack,
+  Switch,
   Table,
   Text,
   TextInput,
@@ -25,7 +26,7 @@ import {
   Title,
   useMantineColorScheme,
 } from "@mantine/core";
-import { Course, createCourse, createGradeItem, createStudent, deleteCourse, exportBackup, Grade, GradeItem, initDatabase, listCourses, listGradeItems, listGrades, listPeriods, listStudents, Period, renameGradeItem, saveGrade, setPeriodClosed, stageRestore, Student, updatePeriod } from "./lib/db";
+import { assignStudentToGroup, copyGroupsFromPeriod, Course, createCourse, createGradeItem, createGroup, createStudent, deleteCourse, deleteGrade, deleteGroup, exportBackup, Grade, GradeHistoryEntry, GradeItem, Group as StudentGroup, GroupMembership, initDatabase, listCourses, listGradeHistory, listGradeItems, listGrades, listGroupMemberships, listGroups, listPeriods, listStudents, Period, renameGradeItem, renameGroup, saveGrade, saveGroupGrade, setPeriodClosed, stageRestore, Student, undoLastGrade, updatePeriod } from "./lib/db";
 import { classifyStudentRows, hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
 
 const emptyStudent: StudentDraft = {
@@ -142,6 +143,7 @@ function App() {
   const [guidedGrades, setGuidedGrades] = useState<{ name: string; values: Array<number | null>; exam: boolean }[]>([]);
   const [guidedError, setGuidedError] = useState("");
   const [exportModal, setExportModal] = useState(false);
+  const [exportError, setExportError] = useState("");
   const [templateModal, setTemplateModal] = useState(false);
   const [templateColumns, setTemplateColumns] = useState<string[]>(["code", "name", "email"]);
   const [exportColumns, setExportColumns] = useState<string[]>(["code", "periodGrade"]);
@@ -150,7 +152,6 @@ function App() {
   const [gradeImportLastIsExam, setGradeImportLastIsExam] = useState(true);
   const [name, setName] = useState("");
   const [studentSearch, setStudentSearch] = useState("");
-  const [gradeFilter, setGradeFilter] = useState("all");
   const [semester, setSemester] = useState("2026-2");
   const [student, setStudent] = useState<StudentDraft>(emptyStudent);
   const [studentErrors, setStudentErrors] = useState<StudentValidation>({});
@@ -158,9 +159,19 @@ function App() {
   const [gradeModal, setGradeModal] = useState(false);
   const [gradeItem, setGradeItem] = useState<GradeItem | null>(null);
   const [gradeIndex, setGradeIndex] = useState(0);
+  const [gradeHistoryModal, setGradeHistoryModal] = useState(false);
+  const [gradeHistory, setGradeHistory] = useState<GradeHistoryEntry[]>([]);
   const [gradeValue, setGradeValue] = useState("");
   const [gradeError, setGradeError] = useState("");
+  const gradeInputRef = useRef<HTMLInputElement>(null);
   const [splitModal, setSplitModal] = useState(false);
+  const [rouletteModal, setRouletteModal] = useState(false);
+  const [rouletteSpinning, setRouletteSpinning] = useState(false);
+  const [rouletteWinner, setRouletteWinner] = useState<Student | null>(null);
+  const [rouletteDisplayName, setRouletteDisplayName] = useState("");
+  const [rouletteVoiceEnabled, setRouletteVoiceEnabled] = useState(true);
+  const rouletteIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const rouletteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activityPercent, setActivityPercent] = useState(40);
   const [examPercent, setExamPercent] = useState(60);
   const [error, setError] = useState("");
@@ -172,6 +183,24 @@ function App() {
   const [backupMessage, setBackupMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [restoreMessage, setRestoreMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [fatalStartupError, setFatalStartupError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"list" | "groups">("list");
+  const [groups, setGroups] = useState<StudentGroup[]>([]);
+  const [memberships, setMemberships] = useState<GroupMembership[]>([]);
+  const [groupManageModal, setGroupManageModal] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [renameGroupTarget, setRenameGroupTarget] = useState<StudentGroup | null>(null);
+  const [renameGroupName, setRenameGroupName] = useState("");
+  const [deleteGroupTarget, setDeleteGroupTarget] = useState<StudentGroup | null>(null);
+  const [copyGroupsSourceId, setCopyGroupsSourceId] = useState<string | null>(null);
+  const [copyGroupsSourceModal, setCopyGroupsSourceModal] = useState(false);
+  const [copyGroupsConfirm, setCopyGroupsConfirm] = useState(false);
+  const [copyGroupsError, setCopyGroupsError] = useState("");
+  const groupDropInFlightRef = useRef(false);
+  const [groupGradeModal, setGroupGradeModal] = useState(false);
+  const [groupGradeGroupId, setGroupGradeGroupId] = useState<string | null>(null);
+  const [groupGradeItemId, setGroupGradeItemId] = useState<string | null>(null);
+  const [groupGradeValue, setGroupGradeValue] = useState("");
+  const [groupGradeError, setGroupGradeError] = useState("");
   const guidedFields = ["Nombre completo", "Código", "Documento", "Correo institucional", "Correo personal"];
 
   useEffect(() => {
@@ -191,6 +220,8 @@ function App() {
       .finally(() => setLoading(false));
     void checkForUpdates(false);
   }, []);
+
+  useEffect(() => () => stopRoulette(), []);
 
   async function handleExportBackup() {
     setBackupMessage(null);
@@ -265,6 +296,19 @@ function App() {
     setStudents(courseStudents);
     setGradeItems(items);
     setGrades(courseGrades);
+    await refreshGroupData(coursePeriods[initialIndex].id);
+  }
+
+  async function refreshGroupData(periodId: string) {
+    const [periodGroups, periodMemberships] = await Promise.all([listGroups(periodId), listGroupMemberships(periodId)]);
+    setGroups(periodGroups);
+    setMemberships(periodMemberships);
+  }
+
+  function groupForStudent(studentId: string): StudentGroup | null {
+    const membership = memberships.find((item) => item.studentId === studentId);
+    if (!membership) return null;
+    return groups.find((group) => group.id === membership.groupId) ?? null;
   }
 
   async function selectPeriod(index: number) {
@@ -273,6 +317,63 @@ function App() {
     setActivityPercent(periods[index].activityPercent);
     setExamPercent(periods[index].examPercent);
     setGradeItems(await listGradeItems(selectedCourse.id, periods[index].id));
+    const periodGroups = await listGroups(periods[index].id);
+    const periodMemberships = await listGroupMemberships(periods[index].id);
+    setGroups(periodGroups);
+    setMemberships(periodMemberships);
+  }
+
+  function stopRoulette() {
+    if (rouletteIntervalRef.current !== null) {
+      clearInterval(rouletteIntervalRef.current);
+      rouletteIntervalRef.current = null;
+    }
+    if (rouletteTimeoutRef.current !== null) {
+      clearTimeout(rouletteTimeoutRef.current);
+      rouletteTimeoutRef.current = null;
+    }
+  }
+
+  function openRoulette() {
+    if (!students.length) return;
+    setRouletteWinner(null);
+    setRouletteDisplayName("");
+    setRouletteModal(true);
+  }
+
+  function closeRoulette() {
+    stopRoulette();
+    if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
+    setRouletteSpinning(false);
+    setRouletteModal(false);
+  }
+
+  function speakRouletteWinner(name: string) {
+    if (!rouletteVoiceEnabled || typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(`Jugador ${name}, eliminado.`);
+    utterance.lang = "es-CO";
+    utterance.rate = 0.8;
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function spinRoulette() {
+    if (!students.length || rouletteSpinning) return;
+    stopRoulette();
+    setRouletteWinner(null);
+    setRouletteSpinning(true);
+    rouletteIntervalRef.current = setInterval(() => {
+      const randomStudent = students[Math.floor(Math.random() * students.length)];
+      setRouletteDisplayName(randomStudent.fullName);
+    }, 80);
+    rouletteTimeoutRef.current = setTimeout(() => {
+      stopRoulette();
+      const winner = students[Math.floor(Math.random() * students.length)];
+      setRouletteDisplayName(winner.fullName);
+      setRouletteWinner(winner);
+      setRouletteSpinning(false);
+      speakRouletteWinner(winner.fullName);
+    }, 1500);
   }
 
   function openSplitEditor() {
@@ -304,19 +405,177 @@ function App() {
     setPeriods((current) => current.map((period) => period.id === activePeriod.id ? { ...period, closed: nextClosed ? 1 : 0 } : period));
   }
 
+  function nextDefaultGroupName() {
+    const numbers = groups.map((group) => {
+      const match = /^Grupo (\d+)$/.exec(group.name);
+      return match ? Number(match[1]) : 0;
+    });
+    const highest = numbers.length ? Math.max(...numbers) : 0;
+    return `Grupo ${highest + 1}`;
+  }
+
+  async function handleCreateGroup() {
+    if (!activePeriod || activeState === "locked") return;
+    const name = newGroupName.trim() || nextDefaultGroupName();
+    try {
+      await createGroup(activePeriod.id, name);
+      setNewGroupName("");
+      await refreshGroupData(activePeriod.id);
+    } catch {
+      setError("No se pudo crear el grupo. Verificá que el nombre no esté repetido en este corte.");
+    }
+  }
+
+  function openRenameGroup(group: StudentGroup) {
+    setRenameGroupTarget(group);
+    setRenameGroupName(group.name);
+  }
+
+  async function handleRenameGroup() {
+    if (!renameGroupTarget || !renameGroupName.trim() || activeState === "locked" || !activePeriod) return;
+    try {
+      await renameGroup(renameGroupTarget.id, renameGroupName.trim());
+      setRenameGroupTarget(null);
+      setRenameGroupName("");
+      await refreshGroupData(activePeriod.id);
+    } catch {
+      setError("No se pudo renombrar el grupo.");
+    }
+  }
+
+  function openDeleteGroupConfirm(group: StudentGroup) {
+    if (activeState === "locked") return;
+    setDeleteGroupTarget(group);
+  }
+
+  function openCopyGroupsModal() {
+    setCopyGroupsSourceId(null);
+    setCopyGroupsError("");
+    setCopyGroupsSourceModal(true);
+  }
+
+  function closeCopyGroupsModal() {
+    setCopyGroupsSourceModal(false);
+    setCopyGroupsSourceId(null);
+    setCopyGroupsError("");
+  }
+
+  function requestCopyGroups() {
+    if (!activePeriod || !copyGroupsSourceId || activeState === "locked") return;
+    setCopyGroupsError("");
+    if (groups.length) {
+      setCopyGroupsSourceModal(false);
+      setCopyGroupsConfirm(true);
+      return;
+    }
+    setCopyGroupsSourceModal(false);
+    void handleCopyGroups();
+  }
+
+  async function handleCopyGroups() {
+    if (!activePeriod || !copyGroupsSourceId) return;
+    setCopyGroupsConfirm(false);
+    try {
+      await copyGroupsFromPeriod(copyGroupsSourceId, activePeriod.id);
+      setCopyGroupsSourceId(null);
+      setCopyGroupsError("");
+      await refreshGroupData(activePeriod.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      setCopyGroupsError(message ? `No se pudieron copiar los grupos: ${message}` : "No se pudieron copiar los grupos.");
+    }
+  }
+
+  async function handleDeleteGroup(groupId: string) {
+    if (!activePeriod || activeState === "locked") return;
+    try {
+      await deleteGroup(groupId);
+      setGroups((current) => current.filter((group) => group.id !== groupId));
+      setMemberships((current) => current.filter((membership) => membership.groupId !== groupId));
+      await refreshGroupData(activePeriod.id);
+    } catch {
+      setError("No se pudo eliminar el grupo.");
+    }
+  }
+
+  function openGroupGradeModal(groupId?: string) {
+    setGroupGradeGroupId(groupId ?? null);
+    setGroupGradeItemId(null);
+    setGroupGradeValue("");
+    setGroupGradeError("");
+    setGroupGradeModal(true);
+  }
+
+  async function handleSaveGroupGrade() {
+    if (!activePeriod || activeState === "locked") { setGroupGradeError("No se puede calificar un corte cerrado."); return; }
+    if (!groupGradeGroupId) { setGroupGradeError("Elegí un grupo."); return; }
+    if (!groupGradeItemId) { setGroupGradeError("Elegí una actividad."); return; }
+    const members = memberships.filter((membership) => membership.groupId === groupGradeGroupId);
+    if (!members.length) { setGroupGradeError("El grupo no tiene estudiantes."); return; }
+    const parsed = parseGrade(groupGradeValue);
+    if ("error" in parsed && parsed.error) { setGroupGradeError(parsed.error); return; }
+    const value = "empty" in parsed ? 0 : parsed.value;
+    const pending = "empty" in parsed ? 1 : 0;
+    try {
+      const updatedGrades = await saveGroupGrade(groupGradeGroupId, groupGradeItemId, value, pending);
+      setGrades((current) => {
+        const filtered = current.filter((grade) => !updatedGrades.some((updated) => updated.studentId === grade.studentId && updated.itemId === grade.itemId));
+        return [...filtered, ...updatedGrades];
+      });
+      setGroupGradeModal(false);
+      setGroupGradeGroupId(null);
+      setGroupGradeItemId(null);
+      setGroupGradeValue("");
+      setGroupGradeError("");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message === "Period is closed") {
+        setGroupGradeError("No se puede calificar: el corte está cerrado.");
+      } else if (message) {
+        setGroupGradeError(`No se pudo calificar al grupo: ${message}`);
+      } else {
+        setGroupGradeError("No se pudo calificar al grupo.");
+      }
+    }
+  }
+
+  async function handleDropOnGroup(groupId: string | null, studentId: string) {
+    if (!activePeriod || activeState === "locked") return;
+    if (groupDropInFlightRef.current) return;
+    groupDropInFlightRef.current = true;
+    const periodId = activePeriod.id;
+    try {
+      await assignStudentToGroup(periodId, studentId, groupId);
+      setMemberships((current) => {
+        const withoutStudent = current.filter((membership) => membership.studentId !== studentId);
+        if (!groupId) return withoutStudent;
+        return [...withoutStudent, { groupId, studentId }];
+      });
+      await refreshGroupData(periodId);
+    } catch {
+      setError("No se pudo asignar el estudiante al grupo.");
+    } finally {
+      groupDropInFlightRef.current = false;
+    }
+  }
+
   const activePeriod = periods[periodIndex];
   const activeState = activePeriod ? periodState(activePeriod) : "active";
   const filteredStudents = students.filter((studentItem) => {
     const query = studentSearch.trim().toLowerCase();
     const matchesSearch = !query || [studentItem.fullName, studentItem.code, studentItem.institutionalEmail].some((value) => value.toLowerCase().includes(query));
-    const calculation = periodCalculation(studentItem.id);
-    const hasPending = gradeItems.some((gradeItem) => gradeFor(studentItem.id, gradeItem.id)?.pending);
-    const matchesFilter = gradeFilter === "all" || (gradeFilter === "pending" && hasPending) || (gradeFilter === "below" && calculation.periodGrade < 3);
-    return matchesSearch && matchesFilter;
+    return matchesSearch;
   });
 
   function gradeFor(studentId: string, itemId: string) {
     return grades.find((grade) => grade.studentId === studentId && grade.itemId === itemId);
+  }
+
+  function gradeableStudentIndexes(itemId: string, gradesList: Grade[] = grades) {
+    return students.map((_, index) => index).filter((index) => {
+      const grade = gradesList.find((item) => item.studentId === students[index].id && item.itemId === itemId);
+      return !grade || !!grade.pending;
+    });
   }
 
   function periodCalculationFor(studentId: string, period: Period, items: GradeItem[]) {
@@ -342,9 +601,14 @@ function App() {
 
   function exportPeriodImage() {
     if (!activePeriod || !students.length || !exportColumns.length) return;
-    const columns = exportColumns.map((key) => ({ key, label: key === "code" ? "Código" : key === "name" ? "Nombre" : key === "periodGrade" ? "Nota del corte" : key === "accumulated" ? "Acumulada" : key === "final" ? "Nota final" : gradeItems.find((item) => item.id === key)?.name ?? key }));
-    const canvas = document.createElement("canvas"); const rowHeight = 42; const columnWidth = 190;
-    canvas.width = Math.max(760, 48 + columns.length * columnWidth); canvas.height = 72 + students.length * rowHeight;
+    setExportError("");
+    const columns = exportColumns.map((key) => ({ key: String(key), label: key === "code" ? "Código" : key === "name" ? "Nombre" : key === "periodGrade" ? "Nota del corte" : key === "accumulated" ? "Acumulada" : key === "final" ? "Nota final" : gradeItems.find((item) => item.id === key)?.name ?? key }));
+    const rowHeight = 42;
+    const maxCanvasWidth = 4096;
+    const columnWidth = Math.max(96, Math.min(190, Math.floor((maxCanvasWidth - 48) / columns.length)));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.min(maxCanvasWidth, Math.max(760, 48 + columns.length * columnWidth));
+    canvas.height = 72 + students.length * rowHeight;
     const context = canvas.getContext("2d"); if (!context) return;
     context.fillStyle = "#ffffff"; context.fillRect(0, 0, canvas.width, canvas.height); context.fillStyle = "#18212f"; context.font = "700 16px sans-serif";
     columns.forEach((column, index) => context.fillText(column.label, 24 + index * columnWidth, 42));
@@ -353,12 +617,20 @@ function App() {
       const y = 88 + rowIndex * rowHeight; const calculation = periodCalculation(studentItem.id); const summary = courseCalculation(studentItem.id);
       columns.forEach((column, columnIndex) => {
         let value = "—";
-        if (column.key === "code") value = studentItem.code; else if (column.key === "name") value = studentItem.fullName; else if (column.key === "activityAverage") value = calculation.activityAverage.toFixed(1).replace(".", ","); else if (column.key === "periodGrade") value = calculation.periodGrade.toFixed(1).replace(".", ","); else if (column.key === "accumulated") value = summary.accumulated === null ? "En curso" : summary.accumulated.toFixed(1).replace(".", ","); else if (column.key === "final") value = summary.final === null ? "En curso" : summary.final.toFixed(1).replace(".", ","); else { const grade = gradeFor(studentItem.id, column.key); value = grade ? grade.value.toFixed(1).replace(".", ",") : "—"; }
+        if (column.key === "code") value = studentItem.code; else if (column.key === "name") value = studentItem.fullName; else if (column.key === "activityAverage") value = calculation.activityAverage.toFixed(1).replace(".", ","); else if (column.key === "periodGrade") value = calculation.periodGrade.toFixed(1).replace(".", ","); else if (column.key === "accumulated") value = summary.accumulated === null ? "En curso" : summary.accumulated.toFixed(1).replace(".", ","); else if (column.key === "final") value = summary.final === null ? "En curso" : summary.final.toFixed(1).replace(".", ","); else { const grade = gradeFor(studentItem.id, column.key); value = grade && !grade.pending && typeof grade.value === "number" ? grade.value.toFixed(1).replace(".", ",") : "—"; }
         context.fillStyle = "#18212f"; context.fillText(value, 24 + columnIndex * columnWidth, y);
       });
       if (rowIndex < students.length - 1) { context.strokeStyle = "#eef1f5"; context.beginPath(); context.moveTo(16, y + 14); context.lineTo(canvas.width - 16, y + 14); context.stroke(); }
     });
-    const link = document.createElement("a"); link.download = `notazod-corte-${activePeriod.number}.png`; link.href = canvas.toDataURL("image/png"); link.click();
+    try {
+      const link = document.createElement("a");
+      link.download = `notazod-corte-${activePeriod.number}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    } catch (cause) {
+      console.error("No se pudo generar la imagen de exportación", cause);
+      setExportError("No se pudo generar la imagen con esas columnas. Probá reducir la cantidad de campos.");
+    }
   }
 
   function openGuidedImport() {
@@ -484,15 +756,30 @@ function App() {
     setSelectedStudent(studentItem); setStudentDetailModal(true);
   }
 
-  function openGradeWalkthrough(item: GradeItem, studentIndex = 0) {
+  useEffect(() => {
+    if (!gradeModal) return;
+    requestAnimationFrame(() => {
+      gradeInputRef.current?.focus();
+      gradeInputRef.current?.select();
+    });
+  }, [gradeModal, gradeIndex]);
+
+  function openGradeWalkthrough(item: GradeItem, studentIndex?: number) {
     const itemPeriod = periods.find((period) => period.id === item.periodId);
     if (!students.length || itemPeriod?.closed) return;
+    let resolvedIndex = studentIndex;
+    if (resolvedIndex === undefined) {
+      const gradeableIndexes = gradeableStudentIndexes(item.id);
+      if (!gradeableIndexes.length) { setError("No hay estudiantes por calificar en esta actividad."); return; }
+      resolvedIndex = gradeableIndexes[0];
+    }
     setGradeItem(item);
-    setGradeIndex(studentIndex);
-    const existing = gradeFor(students[studentIndex].id, item.id);
+    setGradeIndex(resolvedIndex);
+    const existing = gradeFor(students[resolvedIndex].id, item.id);
     setGradeValue(existing && !existing.pending ? String(existing.value).replace(".", ",") : "");
     setGradeError("");
     setGradeModal(true);
+    void refreshGradeHistory(students[resolvedIndex].id, item.id);
   }
 
   async function commitGrade(direction: 1 | -1) {
@@ -509,13 +796,85 @@ function App() {
       setGradeError("No se puede editar un corte cerrado.");
       return;
     }
-    setGrades((currentGrades) => [...currentGrades.filter((grade) => !(grade.studentId === nextGrade.studentId && grade.itemId === nextGrade.itemId)), nextGrade]);
-    const nextIndex = gradeIndex + direction;
-    if (nextIndex < 0 || nextIndex >= students.length) { setGradeModal(false); return; }
+    const updatedGrades = [...grades.filter((grade) => !(grade.studentId === nextGrade.studentId && grade.itemId === nextGrade.itemId)), nextGrade];
+    advanceGradeWalkthrough(direction, updatedGrades);
+  }
+
+  async function clearGrade(direction: 1 | -1) {
+    if (!gradeItem || !students.length) return;
+    const gradePeriod = periods.find((period) => period.id === gradeItem.periodId);
+    if (gradePeriod?.closed) { setGradeError("No se puede editar un corte cerrado."); return; }
+    const current = students[gradeIndex];
+    try {
+      await deleteGrade(current.id, gradeItem.id);
+    } catch {
+      setGradeError("No se puede editar un corte cerrado.");
+      return;
+    }
+    const updatedGrades = grades.filter((grade) => !(grade.studentId === current.id && grade.itemId === gradeItem.id));
+    setGrades(updatedGrades);
+    await refreshGradeHistory(current.id, gradeItem.id);
+    navigateGrade(direction, updatedGrades);
+  }
+
+  async function refreshGradeHistory(studentId: string, itemId: string) {
+    const history = await listGradeHistory(studentId, itemId);
+    setGradeHistory(history);
+  }
+
+  async function undoGrade() {
+    if (!gradeItem || !students.length) return;
+    const gradePeriod = periods.find((period) => period.id === gradeItem.periodId);
+    if (gradePeriod?.closed) { setGradeError("No se puede editar un corte cerrado."); return; }
+    const current = students[gradeIndex];
+    let restored: Grade | null;
+    try {
+      restored = await undoLastGrade(current.id, gradeItem.id);
+    } catch {
+      setGradeError("No se puede editar un corte cerrado.");
+      return;
+    }
+    const updatedGrades = grades.filter((grade) => !(grade.studentId === current.id && grade.itemId === gradeItem.id));
+    if (restored) updatedGrades.push(restored);
+    setGrades(updatedGrades);
+    setGradeValue(restored && !restored.pending ? String(restored.value).replace(".", ",") : "");
+    setGradeError("");
+    await refreshGradeHistory(current.id, gradeItem.id);
+  }
+
+  function openGradeHistory() {
+    setGradeHistoryModal(true);
+  }
+
+  function formatHistoryState(value: number | null, pending: number | null) {
+    if (value === null || pending === null) return "Sin nota";
+    if (pending) return "Pendiente";
+    return String(value).replace(".", ",");
+  }
+
+  function navigateGrade(direction: 1 | -1, gradesList: Grade[] = grades) {
+    if (!gradeItem || !students.length) return;
+    const nextIndex = Math.min(Math.max(gradeIndex + direction, 0), students.length - 1);
     setGradeIndex(nextIndex);
-    const existing = gradeFor(students[nextIndex].id, gradeItem.id);
+    const existing = gradesList.find((grade) => grade.studentId === students[nextIndex].id && grade.itemId === gradeItem.id);
     setGradeValue(existing && !existing.pending ? String(existing.value).replace(".", ",") : "");
     setGradeError("");
+    void refreshGradeHistory(students[nextIndex].id, gradeItem.id);
+  }
+
+  function advanceGradeWalkthrough(direction: 1 | -1, updatedGrades: Grade[]) {
+    if (!gradeItem) return;
+    setGrades(updatedGrades);
+    const gradeableIndexes = gradeableStudentIndexes(gradeItem.id, updatedGrades);
+    const nextIndex = direction === 1
+      ? gradeableIndexes.find((index) => index > gradeIndex)
+      : [...gradeableIndexes].reverse().find((index) => index < gradeIndex);
+    if (nextIndex === undefined) { setGradeModal(false); return; }
+    setGradeIndex(nextIndex);
+    const existing = updatedGrades.find((grade) => grade.studentId === students[nextIndex].id && grade.itemId === gradeItem.id);
+    setGradeValue(existing && !existing.pending ? String(existing.value).replace(".", ",") : "");
+    setGradeError("");
+    void refreshGradeHistory(students[nextIndex].id, gradeItem.id);
   }
 
   function updateStudent(key: keyof StudentDraft, value: string) {
@@ -568,18 +927,52 @@ function App() {
     file.text().then((text) => setGradeImportData(parseGradeFile(text)));
   }
 
+  function templateFieldOptions() {
+    const fixedFields: { key: string; label: string }[] = [
+      { key: "code", label: "Código" },
+      { key: "name", label: "Nombre" },
+      { key: "email", label: "Correo institucional" },
+      { key: "document", label: "Documento" },
+      { key: "personalEmail", label: "Correo personal" },
+    ];
+    const gradeFields = gradeItems.map((item) => ({ key: String(item.id), label: String(item.name ?? item.id) }));
+    const seen = new Set<string>();
+    return [...fixedFields, ...gradeFields].filter((column) => {
+      if (!column.key || seen.has(column.key)) return false;
+      seen.add(column.key);
+      return true;
+    });
+  }
+
+  function toggleTemplateColumn(key: string, checked: boolean) {
+    setTemplateColumns((current) => {
+      const safeCurrent = Array.isArray(current) ? current.filter((value): value is string => typeof value === "string") : [];
+      if (checked) return safeCurrent.includes(key) ? safeCurrent : [...safeCurrent, key];
+      return safeCurrent.filter((value) => value !== key);
+    });
+  }
+
   function downloadGradeTemplate(format: "csv" | "xls") {
     if (!activePeriod || !students.length) return;
     const labels: Record<string, string> = { code: "Código", name: "Nombre", email: "Correo institucional", document: "Documento", personalEmail: "Correo personal" };
-    const headers = templateColumns.map((key) => labels[key] ?? gradeItems.find((item) => item.id === key)?.name ?? key);
-    const lines = [headers, ...students.map((studentItem) => templateColumns.map((key) => key === "code" ? studentItem.code : key === "name" ? studentItem.fullName : key === "email" ? studentItem.institutionalEmail : key === "document" ? studentItem.documentId : key === "personalEmail" ? studentItem.personalEmail : ""))];
+    const headers = templateColumns.map((key) => String(labels[key] ?? gradeItems.find((item) => item.id === key)?.name ?? key));
+    const lines = [headers, ...students.map((studentItem) => templateColumns.map((key) => {
+      const gradeItem = gradeItems.find((item) => item.id === key);
+      if (gradeItem) {
+        const existing = gradeFor(studentItem.id, gradeItem.id);
+        return existing && !existing.pending ? String(existing.value) : "";
+      }
+      const value = key === "code" ? studentItem.code : key === "name" ? studentItem.fullName : key === "email" ? studentItem.institutionalEmail : key === "document" ? studentItem.documentId : key === "personalEmail" ? studentItem.personalEmail : "";
+      return String(value ?? "");
+    }))];
     const csv = lines.map((line) => line.map((value) => `"${value.replace(/"/g, '""')}"`).join(";")).join("\n");
     const html = `<html><head><meta charset="utf-8"></head><body><table>${lines.map((line) => `<tr>${line.map((value) => `<td>${value.replace(/"/g, "")}</td>`).join("")}</tr>`).join("")}</table></body></html>`;
     const link = document.createElement("a");
     link.download = `plantilla-notas-corte-${activePeriod.number}.${format}`;
-    link.href = URL.createObjectURL(new Blob([format === "csv" ? csv : html], { type: format === "csv" ? "text/csv;charset=utf-8" : "application/vnd.ms-excel" }));
+    const objectUrl = URL.createObjectURL(new Blob([format === "csv" ? csv : html], { type: format === "csv" ? "text/csv;charset=utf-8" : "application/vnd.ms-excel" }));
+    link.href = objectUrl;
     link.click();
-    URL.revokeObjectURL(link.href);
+    URL.revokeObjectURL(objectUrl);
     setTemplateModal(false);
   }
 
@@ -697,7 +1090,7 @@ function App() {
             <Group justify="space-between" align="flex-end">
               <div><Title order={1}>{selectedCourse ? selectedCourse.name : "Tus cursos"}</Title></div>
               <Group>
-                {selectedCourse ? <><Button variant="default" onClick={() => setSelectedCourse(null)}>Volver a cursos</Button><Button variant="subtle" color="red" onClick={() => setDeleteCourseModal(true)}>Eliminar curso</Button></> : null}
+                {selectedCourse ? <><Button variant="default" onClick={() => { setSelectedCourse(null); setGroups([]); setMemberships([]); setViewMode("list"); }}>Volver a cursos</Button><Button variant="subtle" color="red" onClick={() => setDeleteCourseModal(true)}>Eliminar curso</Button></> : null}
                 {!selectedCourse ? <Button onClick={() => setCourseModal(true)}>Crear curso</Button> : null}
               </Group>
             </Group>
@@ -711,9 +1104,85 @@ function App() {
               </SimpleGrid>
             ) : (
               <Stack gap="md">
-                <Group align="flex-end" grow><TextInput label="Buscar estudiante" placeholder="Nombre, código o correo" value={studentSearch} onChange={(event) => setStudentSearch(event.currentTarget.value)} /><Select label="Filtrar" value={gradeFilter} data={[{ value: "all", label: "Todos" }, { value: "pending", label: "Pendientes" }, { value: "below", label: "Debajo de 3,0" }]} onChange={(value) => setGradeFilter(value ?? "all")} /></Group><Group justify="space-between" align="flex-end"><div /><Group><Button variant="default" disabled={activeState !== "active"} onClick={() => setActivityModal(true)}>Agregar actividad</Button><Button color="teal" variant="light" onClick={openGuidedImport} disabled={activeState === "locked"}>Importar notas</Button><Button onClick={() => setStudentModal(true)}>Agregar estudiante</Button><Button variant="default" onClick={() => setImportModal(true)}>Importar estudiantes</Button></Group></Group>
-                <Group align="flex-end" wrap="wrap"><Select label="Corte" value={activePeriod?.id ?? null} data={periods.map((period) => ({ value: period.id, label: `Corte ${period.number} · ${periodState(period) === "locked" ? "Cerrado" : "Abierto"}` }))} onChange={(value) => { const index = periods.findIndex((period) => period.id === value); if (index >= 0) void selectPeriod(index); }} /><Button color="blue" variant="light" onClick={openSplitEditor} disabled={activeState === "locked"}>Actividades {activePeriod?.activityPercent ?? 40}% · Parcial {activePeriod?.examPercent ?? 60}%</Button><Button color="violet" variant="light" onClick={() => setExportModal(true)} disabled={!students.length}>Exportar imagen</Button><Button color="blue" variant="light" onClick={() => { setTemplateColumns(["code", "name", "email", ...gradeItems.map((item) => item.id)]); setTemplateModal(true); }} disabled={!students.length}>Descargar plantilla</Button><Button variant={activeState === "locked" ? "light" : "default"} color={activeState === "locked" ? "green" : "orange"} onClick={() => void togglePeriodClosed()}>{activeState === "locked" ? "Reabrir corte" : "Cerrar corte"}</Button><Menu shadow="md" width={220}><Menu.Target><Button color="pink" variant="filled" disabled={activeState !== "active"}>Calificar</Button></Menu.Target><Menu.Dropdown>{gradeItems.map((item) => <Menu.Item key={item.id} onClick={() => openGradeWalkthrough(item)}>Calificar {item.name}</Menu.Item>)}</Menu.Dropdown></Menu></Group>
-                {filteredStudents.length ? <Table.ScrollContainer minWidth={760}><Table className="grade-table" striped highlightOnHover withTableBorder><Table.Thead><Table.Tr><Table.Th>#</Table.Th><Table.Th>Nombre completo</Table.Th><Table.Th>Código</Table.Th><Table.Th>Correo institucional</Table.Th>{gradeItems.map((item) => <Table.Th key={item.id} className="editable-header" onClick={() => openRenameActivity(item)} title="Editar nombre">{item.name}</Table.Th>)}<Table.Th>Nota del corte</Table.Th><Table.Th>Acumulada</Table.Th>{activePeriod?.number === 3 ? <Table.Th>Nota final</Table.Th> : null}<Table.Th>Estado</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{filteredStudents.map((item, studentIndex) => <Table.Tr key={item.id}><Table.Td>{studentIndex + 1}</Table.Td><Table.Td className="student-name-cell" onClick={() => openStudentDetail(item)} title="Ver información y notas">{item.fullName}</Table.Td><Table.Td>{item.code}</Table.Td><Table.Td>{item.institutionalEmail}</Table.Td>{gradeItems.map((gradeItem) => { const grade = gradeFor(item.id, gradeItem.id); return <Table.Td key={gradeItem.id} className="grade-cell" onClick={() => openGradeWalkthrough(gradeItem, students.indexOf(item))} title={activeState === "active" ? "Editar nota" : "Corte cerrado"}>{grade ? <Badge color={grade.pending ? "yellow" : grade.value < 3 ? "red" : "green"} variant="light">{grade.pending ? "Pendiente 0,0" : grade.value.toFixed(1).replace(".", ",")}</Badge> : <Text c="dimmed">—</Text>}</Table.Td>; })}{(() => { const calculation = periodCalculation(item.id); return <><Table.Td><Badge color={activeState === "locked" ? (calculation.periodGrade < 3 ? "red" : "green") : "gray"} variant="light">{`${calculation.periodGrade.toFixed(1).replace(".", ",")}${activeState === "active" ? " · editable" : ""}`}</Badge></Table.Td></>; })()}{(() => { const summary = courseCalculation(item.id); return <><Table.Td>{summary.accumulated === null ? <Text c="dimmed">—</Text> : summary.accumulated.toFixed(1).replace(".", ",")}</Table.Td>{activePeriod?.number === 3 ? <Table.Td>{summary.final === null ? <Text c="dimmed">En curso</Text> : <Badge color={summary.final < 3 ? "red" : "green"}>{summary.final.toFixed(1).replace(".", ",")}</Badge>}</Table.Td> : null}</>; })()}<Table.Td>{gradeItems.some((gradeItem) => gradeFor(item.id, gradeItem.id)?.pending) ? <Badge color="yellow">Pendiente</Badge> : <Text c="dimmed">Sin pendientes</Text>}</Table.Td></Table.Tr>)}</Table.Tbody></Table></Table.ScrollContainer> : <Card withBorder><Text c="dimmed">Este curso todavía no tiene estudiantes.</Text></Card>}
+                <Group align="flex-end" grow><TextInput label="Buscar estudiante" placeholder="Nombre, código o correo" value={studentSearch} onChange={(event) => setStudentSearch(event.currentTarget.value)} /><Switch label="Vista" aria-label="Alternar entre vista de lista y vista de grupos" checked={viewMode === "groups"} onChange={(event) => setViewMode(event.currentTarget.checked ? "groups" : "list")} onLabel="Grupos" offLabel="Lista" size="lg" /></Group><Group justify="space-between" align="flex-end"><div /><Group><Button variant="default" disabled={activeState !== "active"} onClick={() => setActivityModal(true)}>Agregar actividad</Button><Button color="teal" variant="light" onClick={openGuidedImport} disabled={activeState === "locked"}>Importar notas</Button><Button onClick={() => setStudentModal(true)}>Agregar estudiante</Button><Button variant="default" onClick={() => setImportModal(true)}>Importar estudiantes</Button></Group></Group>
+                <Group justify="space-between" align="flex-end" wrap="wrap"><Group align="flex-end" wrap="wrap"><Select label="Corte" value={activePeriod?.id ?? null} data={periods.map((period) => ({ value: period.id, label: `Corte ${period.number} · ${periodState(period) === "locked" ? "Cerrado" : "Abierto"}` }))} onChange={(value) => { const index = periods.findIndex((period) => period.id === value); if (index >= 0) void selectPeriod(index); }} /><Button color="blue" variant="light" onClick={openSplitEditor} disabled={activeState === "locked"}>Actividades {activePeriod?.activityPercent ?? 40}% · Parcial {activePeriod?.examPercent ?? 60}%</Button><Button onClick={openRoulette} disabled={!students.length} style={{ background: "linear-gradient(90deg, #ff3b3b, #ff9500, #ffe135, #2ecc71, #3b82f6, #8b5cf6, #ec4899)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, textShadow: "0 1px 2px rgba(0,0,0,0.35)" }}>Ruleta</Button><Menu shadow="md" width={220}><Menu.Target><Button color="violet" variant="light" disabled={!students.length}>Exportar</Button></Menu.Target><Menu.Dropdown><Menu.Item onClick={() => { setExportError(""); setExportModal(true); }}>Exportar imagen</Menu.Item><Menu.Item onClick={() => { setTemplateColumns(["code", "name", "email", ...gradeItems.map((item) => item.id)]); setTemplateModal(true); }}>Exportar planilla</Menu.Item></Menu.Dropdown></Menu><Menu shadow="md" width={220}><Menu.Target><Button color="pink" variant="filled" disabled={activeState !== "active"}>Calificar</Button></Menu.Target><Menu.Dropdown>{gradeItems.map((item) => <Menu.Item key={item.id} onClick={() => openGradeWalkthrough(item)}>Calificar {item.name}</Menu.Item>)}</Menu.Dropdown></Menu></Group><Button variant={activeState === "locked" ? "light" : "default"} color={activeState === "locked" ? "green" : "orange"} onClick={() => void togglePeriodClosed()}>{activeState === "locked" ? "Reabrir corte" : "Cerrar corte"}</Button></Group>
+                {viewMode === "groups" ? (() => {
+                  const unassignedStudents = filteredStudents.filter((studentItem) => !groupForStudent(studentItem.id));
+                  const renderUnassignedMember = (studentItem: Student) => (
+                    <Group key={studentItem.id} gap="xs" wrap="nowrap">
+                      <Text fw={600} size="sm" onClick={() => openStudentDetail(studentItem)} style={{ cursor: "pointer", flex: 1, minWidth: 0 }} truncate>{studentItem.fullName}</Text>
+                      <Text size="xs" c="dimmed" style={{ minWidth: 70 }}>{studentItem.code}</Text>
+                      {activeState !== "locked" ? (
+                        <Select
+                          size="xs"
+                          placeholder="Mover a grupo…"
+                          searchable
+                          maxDropdownHeight={220}
+                          comboboxProps={{ withinPortal: true, position: "bottom-start" }}
+                          scrollAreaProps={{ type: "always", scrollbarSize: 10 }}
+                          data={[{ value: "__none__", label: "Sin grupo" }, ...groups.map((groupOption) => ({ value: groupOption.id, label: groupOption.name }))]}
+                          value="__none__"
+                          onChange={(value) => { if (!value || value === "__none__") return; void handleDropOnGroup(value, studentItem.id); }}
+                          style={{ width: 160 }}
+                        />
+                      ) : null}
+                    </Group>
+                  );
+                  const renderGroupMember = (studentItem: Student) => (
+                    <Group key={studentItem.id} gap="xs" wrap="nowrap">
+                      <Text fw={600} size="sm" onClick={() => openStudentDetail(studentItem)} style={{ cursor: "pointer", flex: 1, minWidth: 0 }} truncate>{studentItem.fullName}</Text>
+                      {activeState !== "locked" ? (
+                        <Button size="xs" color="red" variant="subtle" onClick={() => void handleDropOnGroup(null, studentItem.id)}>Sacar del grupo</Button>
+                      ) : null}
+                    </Group>
+                  );
+                  const groupGrid = (
+                    <Stack gap="md">
+                      <Group align="flex-end">
+                        <TextInput label="Nombre del grupo" placeholder="Ej. Grupo 1 (vacío = automático)" value={newGroupName} onChange={(event) => setNewGroupName(event.currentTarget.value)} disabled={activeState === "locked"} />
+                        <Button onClick={() => void handleCreateGroup()} disabled={activeState === "locked"}>Crear grupo</Button>
+                        <Button variant="light" onClick={openCopyGroupsModal} disabled={activeState === "locked" || periods.filter((period) => period.id !== activePeriod?.id).length === 0}>Copiar grupos</Button>
+                      </Group>
+                      <SimpleGrid cols={{ base: 1, md: 2, lg: 3 }}>
+                        {groups.map((group) => {
+                          const memberStudents = filteredStudents.filter((studentItem) => groupForStudent(studentItem.id)?.id === group.id);
+                          return (
+                            <Card key={group.id} withBorder padding="sm">
+                              <Stack gap="xs">
+                                <Group justify="space-between">
+                                  <Title order={5}>{group.name}</Title>
+                                  <Group gap="xs">
+                                    <Button size="xs" color="grape" variant="light" disabled={activeState === "locked"} onClick={() => openGroupGradeModal(group.id)}>Calificar grupo</Button>
+                                    <Button size="xs" color="red" variant="light" disabled={activeState === "locked"} onClick={() => openDeleteGroupConfirm(group)}>Eliminar grupo</Button>
+                                  </Group>
+                                </Group>
+                                {memberStudents.length ? (
+                                  <Stack gap={4}>{memberStudents.map((studentItem) => renderGroupMember(studentItem))}</Stack>
+                                ) : <Text c="dimmed" size="sm">Sin estudiantes en este grupo.</Text>}
+                              </Stack>
+                            </Card>
+                          );
+                        })}
+                      </SimpleGrid>
+                    </Stack>
+                  );
+                  if (!unassignedStudents.length) return groupGrid;
+                  return (
+                    <Group align="flex-start" wrap="nowrap" gap="md">
+                      <div style={{ flex: "0 0 280px" }}>
+                        <Card withBorder padding="sm">
+                          <Stack gap="xs">
+                            <Title order={5}>Estudiantes sin grupo</Title>
+                            <Stack gap={4}>{unassignedStudents.map(renderUnassignedMember)}</Stack>
+                          </Stack>
+                        </Card>
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {groupGrid}
+                      </div>
+                    </Group>
+                  );
+                })() : filteredStudents.length ? <Table.ScrollContainer minWidth={760}><Table className="grade-table" striped highlightOnHover withTableBorder><Table.Thead><Table.Tr><Table.Th>#</Table.Th><Table.Th>Nombre completo</Table.Th><Table.Th>Código</Table.Th><Table.Th>Correo institucional</Table.Th>{gradeItems.map((item) => <Table.Th key={item.id} className="editable-header" onClick={() => openRenameActivity(item)} title="Editar nombre">{item.name}</Table.Th>)}<Table.Th>Nota del corte</Table.Th><Table.Th>Acumulada</Table.Th>{activePeriod?.number === 3 ? <Table.Th>Nota final</Table.Th> : null}<Table.Th>Estado</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{filteredStudents.map((item, studentIndex) => <Table.Tr key={item.id}><Table.Td>{studentIndex + 1}</Table.Td><Table.Td className="student-name-cell" onClick={() => openStudentDetail(item)} title="Ver información y notas">{item.fullName}</Table.Td><Table.Td>{item.code}</Table.Td><Table.Td>{item.institutionalEmail}</Table.Td>{gradeItems.map((gradeItem) => { const grade = gradeFor(item.id, gradeItem.id); return <Table.Td key={gradeItem.id} className="grade-cell" onClick={() => openGradeWalkthrough(gradeItem, students.findIndex((studentItem) => studentItem.id === item.id))} title={activeState === "active" ? "Editar nota" : "Corte cerrado"}>{grade ? <Badge color={grade.pending ? "yellow" : grade.value < 3 ? "red" : "green"} variant="light">{grade.pending ? "Pendiente 0,0" : grade.value.toFixed(1).replace(".", ",")}</Badge> : <Text c="dimmed">—</Text>}</Table.Td>; })}{(() => { const calculation = periodCalculation(item.id); return <><Table.Td><Badge color={activeState === "locked" ? (calculation.periodGrade < 3 ? "red" : "green") : "gray"} variant="light">{`${calculation.periodGrade.toFixed(1).replace(".", ",")}${activeState === "active" ? " · editable" : ""}`}</Badge></Table.Td></>; })()}{(() => { const summary = courseCalculation(item.id); return <><Table.Td>{summary.accumulated === null ? <Text c="dimmed">—</Text> : summary.accumulated.toFixed(1).replace(".", ",")}</Table.Td>{activePeriod?.number === 3 ? <Table.Td>{summary.final === null ? <Text c="dimmed">En curso</Text> : <Badge color={summary.final < 3 ? "red" : "green"}>{summary.final.toFixed(1).replace(".", ",")}</Badge>}</Table.Td> : null}</>; })()}<Table.Td>{gradeItems.some((gradeItem) => gradeFor(item.id, gradeItem.id)?.pending) ? <Badge color="yellow">Pendiente</Badge> : <Text c="dimmed">Sin pendientes</Text>}</Table.Td></Table.Tr>)}</Table.Tbody></Table></Table.ScrollContainer> : <Card withBorder><Text c="dimmed">Este curso todavía no tiene estudiantes.</Text></Card>}
               </Stack>
             )}
           </Stack>
@@ -756,18 +1225,105 @@ function App() {
         </Stack>
       </Modal>
       <Modal opened={studentDetailModal} onClose={() => setStudentDetailModal(false)} title={selectedStudent?.fullName ?? "Estudiante"} centered size="lg"><Stack>{selectedStudent ? <><Text size="sm">Código: <b>{selectedStudent.code}</b></Text><Text size="sm">Documento: <b>{selectedStudent.documentId}</b></Text><Text size="sm">Correo institucional: <b>{selectedStudent.institutionalEmail}</b></Text><Text size="sm">Correo personal: <b>{selectedStudent.personalEmail}</b></Text>{periods.map((period) => <Card key={period.id} withBorder><Stack gap="xs"><Group justify="space-between"><Text fw={700}>Corte {period.number}</Text><Badge color={period.closed ? "gray" : "green"}>{period.closed ? "Cerrado" : "Abierto"}</Badge></Group>{(itemsByPeriod[period.id] ?? []).map((item) => { const grade = gradeFor(selectedStudent.id, item.id); return <Group key={item.id} justify="space-between"><Text size="sm">{item.name}</Text><Button size="xs" variant="light" disabled={Boolean(period.closed)} onClick={() => { setStudentDetailModal(false); openGradeWalkthrough(item, students.findIndex((studentItem) => studentItem.id === selectedStudent.id)); }}>{grade ? (grade.pending ? "Pendiente 0,0" : grade.value.toFixed(1).replace(".", ",")) : "Sin nota"}</Button></Group>; })}</Stack></Card>)}</> : null}</Stack></Modal>
+      <Modal opened={rouletteModal} onClose={closeRoulette} title={`Ruleta · ${selectedCourse?.name ?? ""}`} centered><Stack align="center"><Group justify="center"><Text c="dimmed" size="sm">{students.length} {students.length === 1 ? "estudiante" : "estudiantes"} en este curso</Text><Switch size="sm" label="Voz" checked={rouletteVoiceEnabled} onChange={(event) => setRouletteVoiceEnabled(event.currentTarget.checked)} /></Group>{rouletteWinner ? <Stack align="center" gap={4}><Title order={3}>Jugador {rouletteWinner.fullName}, eliminado</Title><Text size="sm" c="dimmed">Código: {rouletteWinner.code}</Text></Stack> : rouletteSpinning ? <Title order={3} c="dimmed">{rouletteDisplayName}</Title> : <Text c="dimmed">Presioná elegir al azar para empezar</Text>}<Group justify="flex-end"><Button variant="default" onClick={closeRoulette}>Cerrar</Button><Button onClick={spinRoulette} disabled={!students.length || rouletteSpinning}>{rouletteSpinning ? "Girando…" : "Elegir al azar"}</Button></Group></Stack></Modal>
       <Modal opened={deleteCourseModal} onClose={() => { setDeleteCourseModal(false); setDeleteConfirmation(""); }} title="Eliminar curso" centered><Stack><Text c="red">Esta acción elimina permanentemente estudiantes, actividades y notas.</Text><Text size="sm">Escribí exactamente <b>{selectedCourse?.name}</b> para confirmar.</Text><TextInput label="Confirmación" value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.currentTarget.value)} autoFocus /><Group justify="flex-end"><Button variant="default" onClick={() => setDeleteCourseModal(false)}>Cancelar</Button><Button color="red" onClick={() => void handleDeleteCourse()} disabled={deleteConfirmation.trim() !== selectedCourse?.name}>Eliminar definitivamente</Button></Group></Stack></Modal>
       <Modal opened={courseModal} onClose={() => setCourseModal(false)} title="Crear curso" centered><Stack><TextInput label="Nombre del curso" placeholder="Ej. Cálculo I" value={name} onChange={(event) => setName(event.currentTarget.value)} required /><TextInput label="Semestre" value={semester} onChange={(event) => setSemester(event.currentTarget.value)} required /><Text size="sm" c="dimmed">Se crearán tres cortes abiertos. Podés cerrar o reabrir cada corte manualmente cuando quieras.</Text><Group justify="flex-end"><Button variant="default" onClick={() => setCourseModal(false)}>Cancelar</Button><Button onClick={handleCreateCourse} disabled={!name.trim()}>Crear curso</Button></Group></Stack></Modal>
       <Modal opened={studentModal} onClose={() => setStudentModal(false)} title="Agregar estudiante" centered><Stack>{field("fullName", "Nombre completo")}{field("code", "Código")}{field("documentId", "Documento")}{field("institutionalEmail", "Correo institucional", "email")}{field("personalEmail", "Correo personal", "email")}<Group justify="flex-end"><Button variant="default" onClick={() => setStudentModal(false)}>Cancelar</Button><Button onClick={handleCreateStudent} disabled={Object.values(student).some((value) => !value.trim())}>Agregar</Button></Group></Stack></Modal>
       <Modal opened={importModal} onClose={() => setImportModal(false)} title="Importar estudiantes" centered><Stack><Text size="sm" c="dimmed">Acepta CSV y archivos .xls exportados como tabla HTML. Se importan Nombre, Documento, Código, Correo 1 y Correo 2; se ignoran Plan de estudios y Estado financiero.</Text><FileButton onChange={handleStudentFile} accept=".csv,.xls,text/csv,application/vnd.ms-excel">{(props) => <Button variant="default" {...props}>Elegir archivo</Button>}</FileButton>{importPreview ? <Stack gap="xs"><Text size="sm"><b>{importPreview.valid.length}</b> listas para importar · <b>{importPreview.duplicate.length}</b> duplicadas · <b>{importPreview.incomplete.length}</b> incompletas · <b>{importPreview.invalid.length}</b> inválidas</Text>{importPreview.incomplete.slice(0, 3).map((item, index) => <Text key={`incomplete-${index}`} size="xs" c="orange">Fila incompleta: {item.reason}</Text>)}{importPreview.invalid.slice(0, 3).map((item, index) => <Text key={`invalid-${index}`} size="xs" c="red">Fila inválida: {item.reason}</Text>)}{importPreview.duplicate.slice(0, 3).map((item, index) => <Text key={`duplicate-${index}`} size="xs" c="dimmed">Fila duplicada: {item.reason}</Text>)}</Stack> : null}<Group justify="flex-end"><Button variant="default" onClick={() => setImportModal(false)}>Cancelar</Button><Button onClick={handleImport} disabled={!importPreview?.valid.length}>Importar</Button></Group></Stack></Modal>
-      <Modal opened={templateModal} onClose={() => setTemplateModal(false)} title="Qué querés exportar" centered><Stack><Text size="sm" c="dimmed">Elegí las columnas de la plantilla y después el formato.</Text>{[{ key: "code", label: "Código" }, { key: "name", label: "Nombre" }, { key: "email", label: "Correo institucional" }, { key: "document", label: "Documento" }, { key: "personalEmail", label: "Correo personal" }, ...gradeItems.map((item) => ({ key: item.id, label: item.name }))].map((column) => <Checkbox key={column.key} label={column.label} checked={templateColumns.includes(column.key)} onChange={(event) => setTemplateColumns((current) => event.currentTarget.checked ? [...current, column.key] : current.filter((key) => key !== column.key))} />)}<Text size="sm" c="dimmed">Formato</Text><Group><Button disabled={!templateColumns.length} onClick={() => downloadGradeTemplate("csv")}>CSV</Button><Button variant="light" disabled={!templateColumns.length} onClick={() => downloadGradeTemplate("xls")}>Excel (.xls)</Button></Group></Stack></Modal>
-      <Modal opened={exportModal} onClose={() => setExportModal(false)} title={`Elegir columnas · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">Elegí qué información querés incluir en la imagen.</Text>{[{ key: "code", label: "Código" }, { key: "name", label: "Nombre" }, ...gradeItems.map((item) => ({ key: item.id, label: item.name })), { key: "periodGrade", label: "Nota del corte" }, { key: "accumulated", label: "Acumulada" }, { key: "final", label: "Nota final" }].map((column) => <Checkbox key={column.key} label={column.label} checked={exportColumns.includes(column.key)} onChange={(event) => setExportColumns((current) => event.currentTarget.checked ? [...current, column.key] : current.filter((key) => key !== column.key))} />)}<Group justify="flex-end"><Button variant="default" onClick={() => setExportModal(false)}>Cancelar</Button><Button disabled={!exportColumns.length} onClick={() => { setExportModal(false); exportPeriodImage(); }}>Descargar imagen</Button></Group></Stack></Modal>
+      <Modal opened={templateModal} onClose={() => setTemplateModal(false)} title="Qué querés exportar" centered><Stack><Text size="sm" c="dimmed">Elegí las columnas de la plantilla y después el formato.</Text>{templateFieldOptions().map((column) => <Checkbox key={column.key} label={column.label} checked={templateColumns.includes(column.key)} onChange={(event) => toggleTemplateColumn(column.key, event.currentTarget.checked)} />)}<Text size="sm" c="dimmed">Formato</Text><Group><Button disabled={!templateColumns.length} onClick={() => downloadGradeTemplate("csv")}>CSV</Button><Button variant="light" disabled={!templateColumns.length} onClick={() => downloadGradeTemplate("xls")}>Excel (.xls)</Button></Group></Stack></Modal>
+      <Modal opened={exportModal} onClose={() => setExportModal(false)} title={`Elegir columnas · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">Elegí qué información querés incluir en la imagen.</Text>{[{ key: "code", label: "Código" }, { key: "name", label: "Nombre" }, ...gradeItems.map((item) => ({ key: String(item.id), label: String(item.name ?? item.id) })), { key: "periodGrade", label: "Nota del corte" }, { key: "accumulated", label: "Acumulada" }, { key: "final", label: "Nota final" }].map((column) => <Checkbox key={column.key} label={column.label} checked={exportColumns.includes(column.key)} onChange={(event) => { const checked = event.currentTarget.checked; setExportColumns((current) => { const safeCurrent = Array.isArray(current) ? current.filter((value): value is string => typeof value === "string") : []; return checked ? safeCurrent.includes(column.key) ? safeCurrent : [...safeCurrent, column.key] : safeCurrent.filter((key) => key !== column.key); }); }} />)}{exportError ? <Text size="sm" c="red">{exportError}</Text> : null}<Group justify="flex-end"><Button variant="default" onClick={() => setExportModal(false)}>Cancelar</Button><Button disabled={!exportColumns.length} onClick={exportPeriodImage}>Descargar imagen</Button></Group></Stack></Modal>
       <Modal opened={guidedModal} onClose={() => setGuidedModal(false)} title="Carga guiada desde Excel" centered size="lg"><Stack><Text size="sm" c="dimmed">Copiá una columna completa en Excel y pegala acá. La cantidad de filas se detecta automáticamente.</Text>{guidedStage === "students" ? <><Title order={4}>{guidedFields[guidedFieldIndex]}</Title><Textarea minRows={8} value={guidedPaste} onChange={(event) => setGuidedPaste(event.currentTarget.value)} placeholder="Ctrl+V acá" autoFocus /><Button onClick={acceptGuidedStudentColumn}>{guidedFieldIndex === guidedFields.length - 1 ? "Continuar con actividades" : "Siguiente columna"}</Button></> : null}{guidedStage === "activity" ? <><Title order={4}>Actividad {guidedGrades.filter((item) => !item.exam).length + 1}</Title>{guidedGrades.filter((item) => !item.exam).map((item, index) => <Group key={`${item.name}-${index}`} justify="space-between"><Text size="sm">{item.name} · {item.values.length} notas cargadas</Text><Button size="xs" color="red" variant="subtle" onClick={() => removeGuidedActivity(index)}>Quitar</Button></Group>)}<TextInput label="Nombre de la actividad" value={guidedActivityName} onChange={(event) => setGuidedActivityName(event.currentTarget.value)} /><Textarea minRows={8} label="Notas, una por línea" value={guidedPaste} onChange={(event) => setGuidedPaste(event.currentTarget.value)} placeholder="Ctrl+V acá" /><Group><Button onClick={() => acceptGuidedActivity(false)}>Agregar otra actividad</Button><Button onClick={goToGuidedExam}>Agregar parcial</Button><Button variant="filled" onClick={saveGuidedWithoutExam}>Guardar carga</Button></Group></> : null}{guidedStage === "exam" ? <><Title order={4}>Agregar parcial</Title><Text size="sm" c="dimmed">El parcial se carga como una única nota. El cálculo interno lo hacés por fuera.</Text><Textarea minRows={8} label="Notas del parcial, una por línea" value={guidedPaste} onChange={(event) => setGuidedPaste(event.currentTarget.value)} placeholder="Ctrl+V acá" /><Group><Button variant="default" onClick={() => { setGuidedStage("activity"); setGuidedPaste(""); }}>Volver a actividades</Button><Button variant="default" onClick={skipGuidedExam}>Omitir parcial</Button><Button onClick={acceptGuidedExam}>Agregar parcial</Button></Group></> : null}{guidedStage === "preview" ? <><Title order={4}>Revisar carga</Title><Text>{guidedColumns[0]?.length ?? 0} estudiantes · {guidedGrades.length} columnas de notas</Text><Text size="sm">{guidedGrades.map((item) => item.name).join(" · ")}</Text><Group><Button variant="default" onClick={() => setGuidedStage(guidedGrades.some((item) => item.exam) ? "exam" : "activity")}>Volver</Button><Button onClick={() => void persistGuidedImport()}>Guardar carga</Button></Group></> : null}{guidedError ? <Text c="red">{guidedError}</Text> : null}</Stack></Modal>
       <Modal opened={gradeImportModal} onClose={() => { setGradeImportModal(false); setGradeImportData(null); }} title={`Importar notas · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">Subí la plantilla o un Excel con una columna Código y luego las columnas de notas. Primero se analiza; nada se guarda hasta confirmar.</Text><FileButton onChange={handleGradeFile} accept=".csv,.xls,text/csv,application/vnd.ms-excel">{(props) => <Button variant="default" {...props}>Elegir archivo</Button>}</FileButton>{gradeImportData ? <Stack gap="xs"><Text size="sm">{gradeImportData.rows.length} filas · {gradeImportData.gradeHeaders.length} columnas de notas</Text><Text size="sm">Última columna: <b>{gradeImportData.gradeHeaders[gradeImportData.gradeHeaders.length - 1]}</b></Text><Group><Button size="xs" variant={gradeImportLastIsExam ? "filled" : "light"} onClick={() => setGradeImportLastIsExam(true)}>Es Parcial</Button><Button size="xs" variant={!gradeImportLastIsExam ? "filled" : "light"} onClick={() => setGradeImportLastIsExam(false)}>Es actividad</Button></Group><Text size="xs" c="dimmed">{gradeImportData.rows.filter((row) => !students.some((student) => student.code === row.code)).length} códigos no encontrados · {gradeImportData.rows.filter((row) => row.invalid.length).length} filas inválidas</Text><Group justify="flex-end"><Button variant="default" onClick={() => setGradeImportData(null)}>Cambiar archivo</Button><Button onClick={() => void importGrades()} disabled={gradeImportData.rows.length === 0}>Importar y guardar</Button></Group></Stack> : null}</Stack></Modal>
       <Modal opened={renameModal} onClose={() => setRenameModal(false)} title="Editar nombre de actividad" centered><Stack><TextInput label="Nombre" value={renameName} onChange={(event) => setRenameName(event.currentTarget.value)} autoFocus /><Group justify="flex-end"><Button variant="default" onClick={() => setRenameModal(false)}>Cancelar</Button><Button onClick={() => void handleRenameActivity()} disabled={!renameName.trim()}>Guardar</Button></Group></Stack></Modal>
       <Modal opened={activityModal} onClose={() => setActivityModal(false)} title={`Agregar actividad · Corte ${activePeriod?.number ?? ""}`} centered><Stack><TextInput label="Nombre de la actividad" placeholder="Ej. Taller 2" value={activityName} onChange={(event) => setActivityName(event.currentTarget.value)} autoFocus required /><Group justify="flex-end"><Button variant="default" onClick={() => setActivityModal(false)}>Cancelar</Button><Button onClick={() => void handleCreateActivity()} disabled={!activityName.trim()}>Agregar</Button></Group></Stack></Modal>
       <Modal opened={splitModal} onClose={() => setSplitModal(false)} title={`Porcentajes · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">La suma debe ser exactamente 100%.</Text><NumberInput label="Actividades" suffix=" %" min={0} max={100} value={activityPercent} onChange={(value) => { const next = typeof value === "number" ? value : 0; setActivityPercent(next); setExamPercent(100 - next); }} /><NumberInput label="Parcial" suffix=" %" min={0} max={100} value={examPercent} onChange={(value) => { const next = typeof value === "number" ? value : 0; setExamPercent(next); setActivityPercent(100 - next); }} /><Text c={activityPercent + examPercent === 100 ? "green" : "red"}>Total: {activityPercent + examPercent}%</Text><Group justify="flex-end"><Button variant="default" onClick={() => setSplitModal(false)}>Cancelar</Button><Button onClick={() => void saveSplit()} disabled={activityPercent + examPercent !== 100}>Guardar</Button></Group></Stack></Modal>
-      <Modal opened={gradeModal} onClose={() => setGradeModal(false)} title={gradeItem ? `Calificar · ${gradeItem.name}` : "Calificar"} centered size="560px"><Stack><Text c="dimmed">Estudiante {gradeIndex + 1} de {students.length}</Text><Title order={3}>{students[gradeIndex]?.fullName}</Title><Text size="sm" c="dimmed">Código {students[gradeIndex]?.code}</Text><TextInput label="Nota (0,0 a 5,0)" value={gradeValue} error={gradeError} autoFocus inputMode="decimal" onChange={(event) => { setGradeValue(event.currentTarget.value); setGradeError(""); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void commitGrade(event.shiftKey ? -1 : 1); } }} /><Group justify="space-between"><Button variant="default" onClick={() => void commitGrade(-1)} disabled={gradeIndex === 0}>Anterior <span className="shortcut">Shift+Enter</span></Button><Button onClick={() => void commitGrade(1)}>Siguiente <span className="shortcut">Enter</span></Button></Group><Text size="xs" c="dimmed">Enter guarda y avanza · Shift+Enter guarda y vuelve · Escape cierra</Text></Stack></Modal>
+      <Modal opened={groupManageModal} onClose={() => { setGroupManageModal(false); setRenameGroupTarget(null); setRenameGroupName(""); }} title={`Grupos · Corte ${activePeriod?.number ?? ""}`} centered>
+        <Stack>
+          {activeState === "locked" ? <Text size="sm" c="dimmed">Este corte está cerrado. No se pueden crear, renombrar ni eliminar grupos.</Text> : null}
+          <Group align="flex-end">
+            <TextInput label="Nombre del grupo" placeholder="Ej. Grupo 1 (vacío = automático)" value={newGroupName} onChange={(event) => setNewGroupName(event.currentTarget.value)} disabled={activeState === "locked"} />
+            <Button onClick={() => void handleCreateGroup()} disabled={activeState === "locked"}>Crear</Button>
+          </Group>
+          <Stack gap="xs">
+            {groups.length ? groups.map((group) => (
+              <Group key={group.id} justify="space-between">
+                {renameGroupTarget?.id === group.id ? (
+                  <Group>
+                    <TextInput value={renameGroupName} onChange={(event) => setRenameGroupName(event.currentTarget.value)} autoFocus />
+                    <Button size="xs" onClick={() => void handleRenameGroup()} disabled={!renameGroupName.trim()}>Guardar</Button>
+                    <Button size="xs" variant="default" onClick={() => { setRenameGroupTarget(null); setRenameGroupName(""); }}>Cancelar</Button>
+                  </Group>
+                ) : (
+                  <>
+                    <Text>{group.name}</Text>
+                    <Group gap="xs">
+                      <Button size="xs" variant="default" onClick={() => openRenameGroup(group)} disabled={activeState === "locked"}>Renombrar</Button>
+                      <Button size="xs" color="red" variant="subtle" onClick={() => openDeleteGroupConfirm(group)} disabled={activeState === "locked"}>Eliminar</Button>
+                    </Group>
+                  </>
+                )}
+              </Group>
+            )) : <Text size="sm" c="dimmed">Todavía no hay grupos en este corte.</Text>}
+          </Stack>
+          <Group justify="flex-end"><Button variant="default" onClick={() => setGroupManageModal(false)}>Cerrar</Button></Group>
+        </Stack>
+      </Modal>
+      <Modal opened={copyGroupsSourceModal} onClose={closeCopyGroupsModal} title="Copiar grupos desde otro corte" centered>
+        <Stack>
+          <Select label="Corte de origen" placeholder="Elegí un corte" data={periods.filter((period) => period.id !== activePeriod?.id).map((period) => ({ value: period.id, label: `Corte ${period.number}` }))} value={copyGroupsSourceId} onChange={(value) => { setCopyGroupsSourceId(value); setCopyGroupsError(""); }} />
+          {copyGroupsError ? <Text size="sm" c="red">{copyGroupsError}</Text> : null}
+          <Group justify="flex-end">
+            <Button variant="default" onClick={closeCopyGroupsModal}>Cancelar</Button>
+            <Button onClick={requestCopyGroups} disabled={!copyGroupsSourceId}>Copiar grupos</Button>
+          </Group>
+        </Stack>
+      </Modal>
+      <Modal opened={copyGroupsConfirm} onClose={() => setCopyGroupsConfirm(false)} title="Reemplazar grupos del corte" centered>
+        <Stack>
+          <Text size="sm">Este corte ya tiene grupos. Copiar desde otro corte reemplaza la organización actual (grupos y asignaciones). Esta acción no se puede deshacer.</Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setCopyGroupsConfirm(false)}>Cancelar</Button>
+            <Button color="red" onClick={() => void handleCopyGroups()}>Reemplazar</Button>
+          </Group>
+        </Stack>
+      </Modal>
+      <Modal opened={!!deleteGroupTarget} onClose={() => setDeleteGroupTarget(null)} title="Eliminar grupo" centered>
+        <Stack>
+          <Text size="sm">¿Seguro que querés eliminar el grupo "{deleteGroupTarget?.name}"? Esta acción no se puede deshacer.</Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setDeleteGroupTarget(null)}>Cancelar</Button>
+            <Button color="red" onClick={() => { if (deleteGroupTarget) { void handleDeleteGroup(deleteGroupTarget.id); } setDeleteGroupTarget(null); }}>Eliminar</Button>
+          </Group>
+        </Stack>
+      </Modal>
+      <Modal opened={groupGradeModal} onClose={() => setGroupGradeModal(false)} title="Calificar grupo" centered>
+        <Stack>
+          {activeState === "locked" ? <Text size="sm" c="dimmed">Este corte está cerrado. No se pueden calificar grupos.</Text> : null}
+          <Select label="Grupo" placeholder="Elegí un grupo" data={groups.map((group) => ({ value: group.id, label: group.name }))} value={groupGradeGroupId} onChange={(value) => { setGroupGradeGroupId(value); setGroupGradeError(""); }} disabled={activeState === "locked"} />
+          <Select label="Actividad" placeholder="Elegí una actividad" data={gradeItems.map((item) => ({ value: item.id, label: item.name }))} value={groupGradeItemId} onChange={(value) => { setGroupGradeItemId(value); setGroupGradeError(""); }} disabled={activeState === "locked"} />
+          <TextInput label="Nota (0,0 a 5,0)" value={groupGradeValue} error={groupGradeError} inputMode="decimal" onChange={(event) => { setGroupGradeValue(event.currentTarget.value); setGroupGradeError(""); }} disabled={activeState === "locked"} />
+          <Text size="xs" c="dimmed">Dejar la nota vacía la marca como pendiente para todos los integrantes del grupo.</Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setGroupGradeModal(false)}>Cancelar</Button>
+            <Button onClick={() => void handleSaveGroupGrade()} disabled={activeState === "locked"}>Guardar</Button>
+          </Group>
+        </Stack>
+      </Modal>
+      <Modal opened={gradeModal} onClose={() => setGradeModal(false)} title={gradeItem ? `Calificar · ${gradeItem.name}` : "Calificar"} centered size="560px" onKeyDown={(event) => { const key = event.key.toLowerCase(); if (key === "enter") { event.preventDefault(); if (event.ctrlKey) { void clearGrade(event.shiftKey ? -1 : 1); } else { void commitGrade(event.shiftKey ? -1 : 1); } return; } if (key === "escape") { event.preventDefault(); setGradeModal(false); return; } if (key === "l") { event.preventDefault(); void commitGrade(1); return; } if (key === "h") { event.preventDefault(); void commitGrade(-1); return; } if (key === "z" && event.ctrlKey) { event.preventDefault(); void undoGrade(); return; } }}><Stack><Text c="dimmed">{(() => { const indexes = gradeItem ? gradeableStudentIndexes(gradeItem.id) : []; const position = indexes.indexOf(gradeIndex); return position >= 0 ? `Por calificar ${position + 1} de ${indexes.length}` : "Editando estudiante"; })()}</Text><Title order={3}>{students[gradeIndex]?.fullName}</Title><Text size="sm" c="dimmed">Código {students[gradeIndex]?.code}</Text><TextInput ref={gradeInputRef} label="Nota (0,0 a 5,0)" value={gradeValue} error={gradeError} autoFocus inputMode="decimal" onChange={(event) => { setGradeValue(event.currentTarget.value); setGradeError(""); }} /><Group justify="space-between" wrap="nowrap"><Button variant="default" onClick={() => void commitGrade(-1)} disabled={gradeIndex === 0}>Anterior <span className="shortcut">Shift+Enter · H</span></Button><Button variant="light" color="gray" onClick={() => void clearGrade(1)}>Quitar nota <span className="shortcut">Ctrl+Enter</span></Button><Button onClick={() => void commitGrade(1)}>Siguiente <span className="shortcut">Enter · L</span></Button></Group><Group justify="space-between"><Button variant="subtle" onClick={openGradeHistory} disabled={!gradeHistory.length}>Historial</Button><Button variant="subtle" color="orange" onClick={() => void undoGrade()} disabled={activeState === "locked" || !gradeHistory.some((entry) => !entry.undone)}>Deshacer <span className="shortcut">Ctrl+Z</span></Button></Group></Stack></Modal>
+      <Modal opened={gradeHistoryModal} onClose={() => setGradeHistoryModal(false)} title={gradeItem ? `Historial · ${students[gradeIndex]?.fullName} · ${gradeItem.name}` : "Historial"} centered>
+        <Stack>
+          {gradeHistory.length ? gradeHistory.map((entry) => (
+            <Group key={entry.id} justify="space-between" wrap="nowrap">
+              <Stack gap={0}>
+                <Text size="sm">{entry.action === "save" ? "Nota guardada" : "Nota eliminada"}{entry.undone ? " · Deshecho" : ""}</Text>
+                <Text size="xs" c="dimmed">{formatHistoryState(entry.previousValue, entry.previousPending)} → {formatHistoryState(entry.newValue, entry.newPending)}</Text>
+              </Stack>
+              <Text size="xs" c="dimmed">{new Date(entry.createdAt).toLocaleString()}</Text>
+            </Group>
+          )) : <Text size="sm" c="dimmed">Sin historial para este estudiante y actividad.</Text>}
+          <Group justify="flex-end"><Button variant="default" onClick={() => setGradeHistoryModal(false)}>Cerrar</Button></Group>
+        </Stack>
+      </Modal>
     </AppShell>
   );
 }

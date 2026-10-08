@@ -1,0 +1,12 @@
+# Student roulette — task mirror
+
+- [x] Add `Ruleta` button to the selected-course toolbar, disabled when the course has no students.
+- [x] Open a modal scoped to `selectedCourse`, using the full `students` array for that course (ignores search/grade/group filters and view mode).
+- [x] Add `Elegir al azar` spin action that picks one student uniformly at random.
+- [x] Add a short rolling/spinning visual state (cycling random names for ~1.5s) before settling on the winner.
+- [x] Show winner's full name and code; allow re-spinning.
+- [x] Keep the roulette read-only and usable on any cutoff state (locked or active).
+- [x] Clear the spin interval on modal close and on component unmount.
+- [ ] Verify in the packaged app with a real course roster.
+
+Decisions: the roulette draws only from the selected course's full student roster, independent of list filters, so it reflects the whole class regardless of what's currently filtered/searched. Spin uses `setInterval` to cycle random names as a visual effect, then `setTimeout` settles on a final uniformly-random pick; both timers are tracked in a ref and cleared on close/unmount. No grade, group, or student records are read/written beyond the already-loaded `students` state.
