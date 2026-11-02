@@ -10,9 +10,9 @@ Branch `feature/campus-course-sync` (based on `feature/open-campus-button`).
 
 ## Tasks
 - T1 (S1, S2) Pure sync planner with tests. Route: inline. Commit: d453d92
-- T2 (S1) Read "Información estudiantes" groups and students in the NOTAZOD Campus window. Route: inline. Commit: next commit (live read pending the user's test)
-- T3 (S2, S3) Home button, preview, apply with a safety backup. Route: inline. Commit: next commit (live test pending)
-- T4 (S4) Import past Campus period grades during sync, with tests (36/36). Route: inline. Commit: next commit (live test pending)
+- T2 (S1) Read "Información estudiantes" groups and students in the NOTAZOD Campus window. Route: inline. Commit: 194216f (live read verified)
+- T3 (S2, S3) Home button, preview, apply with a safety backup. Route: inline. Commit: 194216f, e471814 (live verified)
+- T4 (S4) Import past Campus period grades during sync, with tests (36/36). Route: inline. Commit: 194216f, e471814 (live verified)
 
 ## Log
 - L1: "quiero un boton que este al incio que diga sincrocnizar cursos lo cual va a ir al capus y trae toda la finrmacion de los curso para crearlos como estac actualente resptando las coloumans que tengo acutalente"
@@ -22,3 +22,4 @@ Branch `feature/campus-course-sync` (based on `feature/open-campus-button`).
 - L5: "hay algo importnate en el caso de hacer un sicnrocnizacion y digmaos yo lo hagoen el corte 1 como lo hacemosp ara ir tomadno las notas de los pasado ejemplo estmaos enel 2 el uno esta cerrado pero ya esta subida en el campus cuando sicnroncizamoc que hacemos". Decision: activity "Nota del Campus" at 100%, close the period; never overwrite a period that already has grades.
 - L6: User reported "database is locked" (code 5) after deleting the course "APP 2" and running the sync. Evidence: only the staging app had the file open (8 pooled connections); journal_mode was "delete" because the VACUUM INTO copies made today (test refresh and the production unification) drop WAL; notazod-dev.db had been WAL. Three internal backups were taken but no course was created, so nothing was applied. Likely trigger: deleteCourse runs BEGIN/COMMIT as separate calls on the plugin's connection pool, which can leave one connection inside an open transaction; in rollback-journal mode its read lock blocks every writer. Fix: initDatabase sets PRAGMA journal_mode = WAL on every start; after restart the test DB reports wal. Production notazod.db is also in "delete" mode until it runs this code. Follow-up: make multi-statement transactions safe on the pool.
 - L7: User: "dale". Production notazod.db switched to WAL with the app closed: backup notazod.db.before-wal-20261101-235210 (integrity ok, 565 grades), then PRAGMA journal_mode = WAL; result wal, integrity ok, courses=4, students=80, grades=565; NOTAZOD reopened with notazod.db, -wal and -shm open.
+- L8: User: "mi prueba si se arrelo lo dle curso". Evidence (notazod-test.db): the sync created "APLICACIONES WEB II" (2026-2) with 17 of the 18 Campus students; corte 1 closed, 100/0, single activity "Nota del Campus" with 17 grades; cortes 2 and 3 untouched (40/60, no grades). Student 50124036 (HERNANDEZ MENDEZ DANIELA FERNANDA) was not added; her NOTAZOD data was unique before, so her Campus row was skipped by validation (reason shown in the preview, not captured here).
