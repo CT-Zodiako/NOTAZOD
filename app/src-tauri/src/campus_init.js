@@ -25,7 +25,7 @@
   }
   window.confirm = function (message) {
     if (!automated()) return nativeConfirm(message);
-    var accepted = /esta seguro/.test(normalize(message));
+    var accepted = normalize(message) === "esta seguro";
     record("confirm", message, accepted);
     return accepted;
   };
