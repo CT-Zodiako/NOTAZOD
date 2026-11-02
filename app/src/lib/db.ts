@@ -79,6 +79,9 @@ export async function initDatabase() {
     console.error("Pending restore failed; current database kept active, pending restore retained for retry", error);
   }
   const db = await getDatabase();
+  // WAL keeps readers from blocking writers across the plugin's connection pool. It is stored in the
+  // file, and a database copied with VACUUM INTO comes back in rollback mode, so set it on every start.
+  await db.execute("PRAGMA journal_mode = WAL");
   await db.execute(`
     CREATE TABLE IF NOT EXISTS courses (
       id TEXT PRIMARY KEY NOT NULL,
