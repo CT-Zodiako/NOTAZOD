@@ -26,7 +26,7 @@ import {
   Title,
   useMantineColorScheme,
 } from "@mantine/core";
-import { assignStudentToGroup, copyGroupsFromPeriod, Course, createCourse, createGradeItem, createGroup, createStudent, deleteCourse, deleteGrade, deleteGroup, exportBackup, Grade, GradeHistoryEntry, GradeItem, Group as StudentGroup, GroupMembership, initDatabase, listCourses, listGradeHistory, listGradeItems, listGrades, listGroupMemberships, listGroups, listPeriods, listStudents, Period, renameGradeItem, renameGroup, saveGrade, saveGroupGrade, setPeriodClosed, stageRestore, Student, undoLastGrade, updatePeriod } from "./lib/db";
+import { assignStudentToGroup, copyGroupsFromPeriod, Course, createCourse, createGradeItem, createGroup, createStudent, deleteCourse, deleteGrade, deleteGradeItem, deleteGroup, exportBackup, Grade, GradeHistoryEntry, GradeItem, Group as StudentGroup, GroupMembership, initDatabase, listCourses, listGradeHistory, listGradeItems, listGrades, listGroupMemberships, listGroups, listPeriods, listStudents, Period, renameGradeItem, renameGroup, saveGrade, saveGroupGrade, setPeriodClosed, stageRestore, Student, undoLastGrade, updatePeriod } from "./lib/db";
 import { classifyStudentRows, hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
 
 const emptyStudent: StudentDraft = {
@@ -132,6 +132,7 @@ function App() {
   const [renameModal, setRenameModal] = useState(false);
   const [renameItem, setRenameItem] = useState<GradeItem | null>(null);
   const [renameName, setRenameName] = useState("");
+  const [deleteActivityConfirm, setDeleteActivityConfirm] = useState(false);
   const [activityName, setActivityName] = useState("");
   const [importModal, setImportModal] = useState(false);
   const [guidedModal, setGuidedModal] = useState(false);
@@ -561,6 +562,9 @@ function App() {
 
   const activePeriod = periods[periodIndex];
   const activeState = activePeriod ? periodState(activePeriod) : "active";
+  const exportColumnOptions = [{ key: "code", label: "Código" }, { key: "name", label: "Nombre" }, ...gradeItems.map((item) => ({ key: String(item.id), label: String(item.name ?? item.id) })), { key: "periodGrade", label: "Nota del corte" }, { key: "accumulated", label: "Acumulada" }, { key: "final", label: "Nota final" }];
+  const hasExportSelection = exportColumnOptions.some((column) => exportColumns.includes(column.key));
+  const renameItemGradeCount = renameItem ? grades.filter((grade) => grade.itemId === renameItem.id).length : 0;
   const filteredStudents = students.filter((studentItem) => {
     const query = studentSearch.trim().toLowerCase();
     const matchesSearch = !query || [studentItem.fullName, studentItem.code, studentItem.institutionalEmail].some((value) => value.toLowerCase().includes(query));
@@ -602,24 +606,39 @@ function App() {
   function exportPeriodImage() {
     if (!activePeriod || !students.length || !exportColumns.length) return;
     setExportError("");
-    const columns = exportColumns.map((key) => ({ key: String(key), label: key === "code" ? "Código" : key === "name" ? "Nombre" : key === "periodGrade" ? "Nota del corte" : key === "accumulated" ? "Acumulada" : key === "final" ? "Nota final" : gradeItems.find((item) => item.id === key)?.name ?? key }));
-    const rowHeight = 42;
-    const maxCanvasWidth = 4096;
-    const columnWidth = Math.max(96, Math.min(190, Math.floor((maxCanvasWidth - 48) / columns.length)));
+    // Only columns available in the active period, in the same order as the column picker.
+    const columns = exportColumnOptions.filter((column) => exportColumns.includes(column.key));
+    if (!columns.length) return;
+    const valueFor = (studentItem: Student, key: string) => {
+      const calculation = periodCalculation(studentItem.id); const summary = courseCalculation(studentItem.id);
+      if (key === "code") return studentItem.code; if (key === "name") return studentItem.fullName; if (key === "activityAverage") return calculation.activityAverage.toFixed(1).replace(".", ","); if (key === "periodGrade") return calculation.periodGrade.toFixed(1).replace(".", ","); if (key === "accumulated") return summary.accumulated === null ? "En curso" : summary.accumulated.toFixed(1).replace(".", ","); if (key === "final") return summary.final === null ? "En curso" : summary.final.toFixed(1).replace(".", ",");
+      const grade = gradeFor(studentItem.id, key); return grade && !grade.pending && typeof grade.value === "number" ? grade.value.toFixed(1).replace(".", ",") : "—";
+    };
+    const headerFont = "700 16px sans-serif"; const bodyFont = "15px sans-serif";
+    const rowHeight = 42; const padding = 24; const columnGap = 28; const maxColumnWidth = 320; const maxCanvasWidth = 8192;
+    const measure = document.createElement("canvas").getContext("2d"); if (!measure) return;
+    const rows = students.map((studentItem) => columns.map((column) => valueFor(studentItem, column.key)));
+    const widths = columns.map((column, index) => {
+      measure.font = headerFont; let width = measure.measureText(column.label).width;
+      measure.font = bodyFont; rows.forEach((row) => { width = Math.max(width, measure.measureText(row[index]).width); });
+      return Math.ceil(Math.min(maxColumnWidth, Math.max(48, width)));
+    });
+    const offsets = widths.reduce<number[]>((acc, _, index) => [...acc, index === 0 ? padding : acc[index - 1] + widths[index - 1] + columnGap], []);
     const canvas = document.createElement("canvas");
-    canvas.width = Math.min(maxCanvasWidth, Math.max(760, 48 + columns.length * columnWidth));
+    canvas.width = Math.min(maxCanvasWidth, Math.max(760, offsets[offsets.length - 1] + widths[widths.length - 1] + padding));
     canvas.height = 72 + students.length * rowHeight;
     const context = canvas.getContext("2d"); if (!context) return;
-    context.fillStyle = "#ffffff"; context.fillRect(0, 0, canvas.width, canvas.height); context.fillStyle = "#18212f"; context.font = "700 16px sans-serif";
-    columns.forEach((column, index) => context.fillText(column.label, 24 + index * columnWidth, 42));
-    context.strokeStyle = "#d9e0ea"; context.beginPath(); context.moveTo(16, 58); context.lineTo(canvas.width - 16, 58); context.stroke(); context.font = "15px sans-serif";
-    students.forEach((studentItem, rowIndex) => {
-      const y = 88 + rowIndex * rowHeight; const calculation = periodCalculation(studentItem.id); const summary = courseCalculation(studentItem.id);
-      columns.forEach((column, columnIndex) => {
-        let value = "—";
-        if (column.key === "code") value = studentItem.code; else if (column.key === "name") value = studentItem.fullName; else if (column.key === "activityAverage") value = calculation.activityAverage.toFixed(1).replace(".", ","); else if (column.key === "periodGrade") value = calculation.periodGrade.toFixed(1).replace(".", ","); else if (column.key === "accumulated") value = summary.accumulated === null ? "En curso" : summary.accumulated.toFixed(1).replace(".", ","); else if (column.key === "final") value = summary.final === null ? "En curso" : summary.final.toFixed(1).replace(".", ","); else { const grade = gradeFor(studentItem.id, column.key); value = grade && !grade.pending && typeof grade.value === "number" ? grade.value.toFixed(1).replace(".", ",") : "—"; }
-        context.fillStyle = "#18212f"; context.fillText(value, 24 + columnIndex * columnWidth, y);
-      });
+    const fit = (text: string, width: number) => {
+      if (context.measureText(text).width <= width) return text;
+      let cut = text; while (cut.length > 1 && context.measureText(`${cut}…`).width > width) cut = cut.slice(0, -1);
+      return `${cut}…`;
+    };
+    context.fillStyle = "#ffffff"; context.fillRect(0, 0, canvas.width, canvas.height); context.fillStyle = "#18212f"; context.font = headerFont;
+    columns.forEach((column, index) => context.fillText(fit(column.label, widths[index]), offsets[index], 42));
+    context.strokeStyle = "#d9e0ea"; context.beginPath(); context.moveTo(16, 58); context.lineTo(canvas.width - 16, 58); context.stroke(); context.font = bodyFont;
+    rows.forEach((row, rowIndex) => {
+      const y = 88 + rowIndex * rowHeight;
+      row.forEach((value, columnIndex) => { context.fillStyle = "#18212f"; context.fillText(fit(value, widths[columnIndex]), offsets[columnIndex], y); });
       if (rowIndex < students.length - 1) { context.strokeStyle = "#eef1f5"; context.beginPath(); context.moveTo(16, y + 14); context.lineTo(canvas.width - 16, y + 14); context.stroke(); }
     });
     try {
@@ -725,7 +744,20 @@ function App() {
 
   function openRenameActivity(item: GradeItem) {
     if (activeState === "locked") return;
-    setRenameItem(item); setRenameName(item.name); setRenameModal(true);
+    setRenameItem(item); setRenameName(item.name); setDeleteActivityConfirm(false); setRenameModal(true);
+  }
+
+  async function handleDeleteActivity() {
+    if (!renameItem || renameItem.isExam || !activePeriod || activeState === "locked") return;
+    const removedId = renameItem.id;
+    try {
+      await deleteGradeItem(removedId);
+      const remove = (items: GradeItem[]) => items.filter((item) => item.id !== removedId);
+      setGradeItems(remove); setItemsByPeriod((current) => ({ ...current, [activePeriod.id]: remove(current[activePeriod.id] ?? []) }));
+      setGrades((current) => current.filter((grade) => grade.itemId !== removedId));
+      setExportColumns((current) => current.filter((key) => key !== removedId));
+      setRenameModal(false); setRenameItem(null); setDeleteActivityConfirm(false);
+    } catch { setError("No se pudo eliminar la actividad. Verificá que el corte esté abierto."); }
   }
 
   async function handleRenameActivity() {
@@ -1231,10 +1263,10 @@ function App() {
       <Modal opened={studentModal} onClose={() => setStudentModal(false)} title="Agregar estudiante" centered><Stack>{field("fullName", "Nombre completo")}{field("code", "Código")}{field("documentId", "Documento")}{field("institutionalEmail", "Correo institucional", "email")}{field("personalEmail", "Correo personal", "email")}<Group justify="flex-end"><Button variant="default" onClick={() => setStudentModal(false)}>Cancelar</Button><Button onClick={handleCreateStudent} disabled={Object.values(student).some((value) => !value.trim())}>Agregar</Button></Group></Stack></Modal>
       <Modal opened={importModal} onClose={() => setImportModal(false)} title="Importar estudiantes" centered><Stack><Text size="sm" c="dimmed">Acepta CSV y archivos .xls exportados como tabla HTML. Se importan Nombre, Documento, Código, Correo 1 y Correo 2; se ignoran Plan de estudios y Estado financiero.</Text><FileButton onChange={handleStudentFile} accept=".csv,.xls,text/csv,application/vnd.ms-excel">{(props) => <Button variant="default" {...props}>Elegir archivo</Button>}</FileButton>{importPreview ? <Stack gap="xs"><Text size="sm"><b>{importPreview.valid.length}</b> listas para importar · <b>{importPreview.duplicate.length}</b> duplicadas · <b>{importPreview.incomplete.length}</b> incompletas · <b>{importPreview.invalid.length}</b> inválidas</Text>{importPreview.incomplete.slice(0, 3).map((item, index) => <Text key={`incomplete-${index}`} size="xs" c="orange">Fila incompleta: {item.reason}</Text>)}{importPreview.invalid.slice(0, 3).map((item, index) => <Text key={`invalid-${index}`} size="xs" c="red">Fila inválida: {item.reason}</Text>)}{importPreview.duplicate.slice(0, 3).map((item, index) => <Text key={`duplicate-${index}`} size="xs" c="dimmed">Fila duplicada: {item.reason}</Text>)}</Stack> : null}<Group justify="flex-end"><Button variant="default" onClick={() => setImportModal(false)}>Cancelar</Button><Button onClick={handleImport} disabled={!importPreview?.valid.length}>Importar</Button></Group></Stack></Modal>
       <Modal opened={templateModal} onClose={() => setTemplateModal(false)} title="Qué querés exportar" centered><Stack><Text size="sm" c="dimmed">Elegí las columnas de la plantilla y después el formato.</Text>{templateFieldOptions().map((column) => <Checkbox key={column.key} label={column.label} checked={templateColumns.includes(column.key)} onChange={(event) => toggleTemplateColumn(column.key, event.currentTarget.checked)} />)}<Text size="sm" c="dimmed">Formato</Text><Group><Button disabled={!templateColumns.length} onClick={() => downloadGradeTemplate("csv")}>CSV</Button><Button variant="light" disabled={!templateColumns.length} onClick={() => downloadGradeTemplate("xls")}>Excel (.xls)</Button></Group></Stack></Modal>
-      <Modal opened={exportModal} onClose={() => setExportModal(false)} title={`Elegir columnas · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">Elegí qué información querés incluir en la imagen.</Text>{[{ key: "code", label: "Código" }, { key: "name", label: "Nombre" }, ...gradeItems.map((item) => ({ key: String(item.id), label: String(item.name ?? item.id) })), { key: "periodGrade", label: "Nota del corte" }, { key: "accumulated", label: "Acumulada" }, { key: "final", label: "Nota final" }].map((column) => <Checkbox key={column.key} label={column.label} checked={exportColumns.includes(column.key)} onChange={(event) => { const checked = event.currentTarget.checked; setExportColumns((current) => { const safeCurrent = Array.isArray(current) ? current.filter((value): value is string => typeof value === "string") : []; return checked ? safeCurrent.includes(column.key) ? safeCurrent : [...safeCurrent, column.key] : safeCurrent.filter((key) => key !== column.key); }); }} />)}{exportError ? <Text size="sm" c="red">{exportError}</Text> : null}<Group justify="flex-end"><Button variant="default" onClick={() => setExportModal(false)}>Cancelar</Button><Button disabled={!exportColumns.length} onClick={exportPeriodImage}>Descargar imagen</Button></Group></Stack></Modal>
+      <Modal opened={exportModal} onClose={() => setExportModal(false)} title={`Elegir columnas · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">Elegí qué información querés incluir en la imagen.</Text>{exportColumnOptions.map((column) => <Checkbox key={column.key} label={column.label} checked={exportColumns.includes(column.key)} onChange={(event) => { const checked = event.currentTarget.checked; setExportColumns((current) => { const safeCurrent = Array.isArray(current) ? current.filter((value): value is string => typeof value === "string") : []; return checked ? safeCurrent.includes(column.key) ? safeCurrent : [...safeCurrent, column.key] : safeCurrent.filter((key) => key !== column.key); }); }} />)}{exportError ? <Text size="sm" c="red">{exportError}</Text> : null}<Group justify="flex-end"><Button variant="default" onClick={() => setExportModal(false)}>Cancelar</Button><Button disabled={!hasExportSelection} onClick={exportPeriodImage}>Descargar imagen</Button></Group></Stack></Modal>
       <Modal opened={guidedModal} onClose={() => setGuidedModal(false)} title="Carga guiada desde Excel" centered size="lg"><Stack><Text size="sm" c="dimmed">Copiá una columna completa en Excel y pegala acá. La cantidad de filas se detecta automáticamente.</Text>{guidedStage === "students" ? <><Title order={4}>{guidedFields[guidedFieldIndex]}</Title><Textarea minRows={8} value={guidedPaste} onChange={(event) => setGuidedPaste(event.currentTarget.value)} placeholder="Ctrl+V acá" autoFocus /><Button onClick={acceptGuidedStudentColumn}>{guidedFieldIndex === guidedFields.length - 1 ? "Continuar con actividades" : "Siguiente columna"}</Button></> : null}{guidedStage === "activity" ? <><Title order={4}>Actividad {guidedGrades.filter((item) => !item.exam).length + 1}</Title>{guidedGrades.filter((item) => !item.exam).map((item, index) => <Group key={`${item.name}-${index}`} justify="space-between"><Text size="sm">{item.name} · {item.values.length} notas cargadas</Text><Button size="xs" color="red" variant="subtle" onClick={() => removeGuidedActivity(index)}>Quitar</Button></Group>)}<TextInput label="Nombre de la actividad" value={guidedActivityName} onChange={(event) => setGuidedActivityName(event.currentTarget.value)} /><Textarea minRows={8} label="Notas, una por línea" value={guidedPaste} onChange={(event) => setGuidedPaste(event.currentTarget.value)} placeholder="Ctrl+V acá" /><Group><Button onClick={() => acceptGuidedActivity(false)}>Agregar otra actividad</Button><Button onClick={goToGuidedExam}>Agregar parcial</Button><Button variant="filled" onClick={saveGuidedWithoutExam}>Guardar carga</Button></Group></> : null}{guidedStage === "exam" ? <><Title order={4}>Agregar parcial</Title><Text size="sm" c="dimmed">El parcial se carga como una única nota. El cálculo interno lo hacés por fuera.</Text><Textarea minRows={8} label="Notas del parcial, una por línea" value={guidedPaste} onChange={(event) => setGuidedPaste(event.currentTarget.value)} placeholder="Ctrl+V acá" /><Group><Button variant="default" onClick={() => { setGuidedStage("activity"); setGuidedPaste(""); }}>Volver a actividades</Button><Button variant="default" onClick={skipGuidedExam}>Omitir parcial</Button><Button onClick={acceptGuidedExam}>Agregar parcial</Button></Group></> : null}{guidedStage === "preview" ? <><Title order={4}>Revisar carga</Title><Text>{guidedColumns[0]?.length ?? 0} estudiantes · {guidedGrades.length} columnas de notas</Text><Text size="sm">{guidedGrades.map((item) => item.name).join(" · ")}</Text><Group><Button variant="default" onClick={() => setGuidedStage(guidedGrades.some((item) => item.exam) ? "exam" : "activity")}>Volver</Button><Button onClick={() => void persistGuidedImport()}>Guardar carga</Button></Group></> : null}{guidedError ? <Text c="red">{guidedError}</Text> : null}</Stack></Modal>
       <Modal opened={gradeImportModal} onClose={() => { setGradeImportModal(false); setGradeImportData(null); }} title={`Importar notas · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">Subí la plantilla o un Excel con una columna Código y luego las columnas de notas. Primero se analiza; nada se guarda hasta confirmar.</Text><FileButton onChange={handleGradeFile} accept=".csv,.xls,text/csv,application/vnd.ms-excel">{(props) => <Button variant="default" {...props}>Elegir archivo</Button>}</FileButton>{gradeImportData ? <Stack gap="xs"><Text size="sm">{gradeImportData.rows.length} filas · {gradeImportData.gradeHeaders.length} columnas de notas</Text><Text size="sm">Última columna: <b>{gradeImportData.gradeHeaders[gradeImportData.gradeHeaders.length - 1]}</b></Text><Group><Button size="xs" variant={gradeImportLastIsExam ? "filled" : "light"} onClick={() => setGradeImportLastIsExam(true)}>Es Parcial</Button><Button size="xs" variant={!gradeImportLastIsExam ? "filled" : "light"} onClick={() => setGradeImportLastIsExam(false)}>Es actividad</Button></Group><Text size="xs" c="dimmed">{gradeImportData.rows.filter((row) => !students.some((student) => student.code === row.code)).length} códigos no encontrados · {gradeImportData.rows.filter((row) => row.invalid.length).length} filas inválidas</Text><Group justify="flex-end"><Button variant="default" onClick={() => setGradeImportData(null)}>Cambiar archivo</Button><Button onClick={() => void importGrades()} disabled={gradeImportData.rows.length === 0}>Importar y guardar</Button></Group></Stack> : null}</Stack></Modal>
-      <Modal opened={renameModal} onClose={() => setRenameModal(false)} title="Editar nombre de actividad" centered><Stack><TextInput label="Nombre" value={renameName} onChange={(event) => setRenameName(event.currentTarget.value)} autoFocus /><Group justify="flex-end"><Button variant="default" onClick={() => setRenameModal(false)}>Cancelar</Button><Button onClick={() => void handleRenameActivity()} disabled={!renameName.trim()}>Guardar</Button></Group></Stack></Modal>
+      <Modal opened={renameModal} onClose={() => { setRenameModal(false); setDeleteActivityConfirm(false); }} title="Editar actividad" centered><Stack>{deleteActivityConfirm ? <><Text c="red">Vas a eliminar <b>{renameItem?.name}</b> de este corte.</Text><Text size="sm">{renameItemGradeCount ? `Se borrarán también ${renameItemGradeCount} nota${renameItemGradeCount === 1 ? "" : "s"} registrada${renameItemGradeCount === 1 ? "" : "s"} en esta actividad.` : "Esta actividad no tiene notas registradas."} Antes de eliminar se guarda una copia de seguridad interna.</Text><Group justify="flex-end"><Button variant="default" onClick={() => setDeleteActivityConfirm(false)}>Volver</Button><Button color="red" onClick={() => void handleDeleteActivity()}>Eliminar actividad</Button></Group></> : <><TextInput label="Nombre" value={renameName} onChange={(event) => setRenameName(event.currentTarget.value)} autoFocus /><Group justify="space-between">{renameItem && !renameItem.isExam ? <Button variant="subtle" color="red" onClick={() => setDeleteActivityConfirm(true)}>Eliminar actividad</Button> : <div />}<Group><Button variant="default" onClick={() => setRenameModal(false)}>Cancelar</Button><Button onClick={() => void handleRenameActivity()} disabled={!renameName.trim()}>Guardar</Button></Group></Group></>}</Stack></Modal>
       <Modal opened={activityModal} onClose={() => setActivityModal(false)} title={`Agregar actividad · Corte ${activePeriod?.number ?? ""}`} centered><Stack><TextInput label="Nombre de la actividad" placeholder="Ej. Taller 2" value={activityName} onChange={(event) => setActivityName(event.currentTarget.value)} autoFocus required /><Group justify="flex-end"><Button variant="default" onClick={() => setActivityModal(false)}>Cancelar</Button><Button onClick={() => void handleCreateActivity()} disabled={!activityName.trim()}>Agregar</Button></Group></Stack></Modal>
       <Modal opened={splitModal} onClose={() => setSplitModal(false)} title={`Porcentajes · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">La suma debe ser exactamente 100%.</Text><NumberInput label="Actividades" suffix=" %" min={0} max={100} value={activityPercent} onChange={(value) => { const next = typeof value === "number" ? value : 0; setActivityPercent(next); setExamPercent(100 - next); }} /><NumberInput label="Parcial" suffix=" %" min={0} max={100} value={examPercent} onChange={(value) => { const next = typeof value === "number" ? value : 0; setExamPercent(next); setActivityPercent(100 - next); }} /><Text c={activityPercent + examPercent === 100 ? "green" : "red"}>Total: {activityPercent + examPercent}%</Text><Group justify="flex-end"><Button variant="default" onClick={() => setSplitModal(false)}>Cancelar</Button><Button onClick={() => void saveSplit()} disabled={activityPercent + examPercent !== 100}>Guardar</Button></Group></Stack></Modal>
       <Modal opened={groupManageModal} onClose={() => { setGroupManageModal(false); setRenameGroupTarget(null); setRenameGroupName(""); }} title={`Grupos · Corte ${activePeriod?.number ?? ""}`} centered>

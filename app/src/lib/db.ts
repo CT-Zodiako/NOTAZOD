@@ -284,6 +284,25 @@ export async function renameGradeItem(itemId: string, name: string) {
   await db.execute("UPDATE grade_items SET name = $1 WHERE id = $2", [name, itemId]);
 }
 
+export async function deleteGradeItem(itemId: string) {
+  const db = await getDatabase();
+  const item = await db.select<{ periodId: string | null; isExam: number }[]>("SELECT period_id AS periodId, is_exam AS isExam FROM grade_items WHERE id = $1", [itemId]);
+  if (!item[0]) throw new Error("Grade item not found");
+  if (item[0].isExam) throw new Error("Exam items cannot be deleted");
+  if (item[0].periodId) await assertPeriodOpen(db, item[0].periodId);
+  await createInternalBackup(db);
+  await db.execute("BEGIN");
+  try {
+    await db.execute("DELETE FROM grade_history WHERE item_id = $1", [itemId]);
+    await db.execute("DELETE FROM grades WHERE item_id = $1", [itemId]);
+    await db.execute("DELETE FROM grade_items WHERE id = $1", [itemId]);
+    await db.execute("COMMIT");
+  } catch (error) {
+    await db.execute("ROLLBACK");
+    throw error;
+  }
+}
+
 export async function createGradeItem(courseId: string, periodId: string, name: string, isExam = 0): Promise<GradeItem> {
   const db = await getDatabase();
   const period = await db.select<{ closed: number }[]>("SELECT closed FROM periods WHERE id = $1", [periodId]);
