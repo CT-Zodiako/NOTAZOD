@@ -255,111 +255,65 @@ fn apply_pending_restore(app: tauri::AppHandle, db_name: String) -> Result<bool,
     }
 }
 
-// The Campus upload tool is embedded so the packaged app does not depend on the repository.
-const CAMPUS_UPLOAD_SCRIPT: &str = include_str!("../../../tools/campus-upload/campus-upload.mjs");
-const CAMPUS_GRADES_LIB: &str = include_str!("../../../tools/campus-upload/grades.mjs");
+// The Campus opens in its own NOTAZOD window. The window has no capability, so the Campus page
+// cannot call the app; the main window drives it through campus_eval instead.
+const CAMPUS_HOST: &str = "campus2.unimayor.edu.co";
+const CAMPUS_START_URL: &str =
+    "https://campus2.unimayor.edu.co/CampusRegistroNotas/Formularios/wfListarGruposCalif.aspx";
+const CAMPUS_WINDOW: &str = "campus";
+const CAMPUS_INIT_SCRIPT: &str = include_str!("campus_init.js");
 
-// GUI apps on macOS start with a minimal PATH, so look in the usual install locations first.
-fn find_ego_browser() -> Result<std::path::PathBuf, String> {
-    let mut candidates = Vec::new();
-    if let Some(home) = std::env::var_os("HOME") {
-        candidates.push(std::path::PathBuf::from(home).join(".local/bin/ego-browser"));
-    }
-    candidates.push(std::path::PathBuf::from("/opt/homebrew/bin/ego-browser"));
-    candidates.push(std::path::PathBuf::from("/usr/local/bin/ego-browser"));
-    if let Some(path) = std::env::var_os("PATH") {
-        candidates.extend(std::env::split_paths(&path).map(|dir| dir.join("ego-browser")));
-    }
-    candidates
-        .into_iter()
-        .find(|candidate| candidate.is_file())
-        .ok_or_else(|| "ego-browser is not installed".to_string())
+fn is_campus_url(url: &tauri::Url) -> bool {
+    url.scheme() == "https" && url.host_str() == Some(CAMPUS_HOST)
 }
 
-// Runs the Campus upload for one course and returns its JSON report plus the tool log.
-// With save = false it only verifies; the tool itself refuses to save unless every group of the course is verified.
 #[tauri::command]
-async fn campus_upload(
-    app: tauri::AppHandle,
-    db_name: String,
-    course_id: String,
-    save: bool,
-) -> Result<serde_json::Value, String> {
-    use std::io::Write;
+async fn campus_open(app: tauri::AppHandle) -> Result<(), String> {
     use tauri::Manager;
 
-    validate_db_name(&db_name)?;
-    if course_id.trim().is_empty() {
-        return Err("Missing course".into());
+    if let Some(window) = app.get_webview_window(CAMPUS_WINDOW) {
+        let _ = window.unminimize();
+        window.show().map_err(|error| error.to_string())?;
+        window.set_focus().map_err(|error| error.to_string())?;
+        return Ok(());
     }
-    let db_path = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?
-        .join(&db_name);
-    if !db_path.is_file() {
-        return Err(format!("Database not found: {}", db_path.display()));
+    let url = CAMPUS_START_URL.parse::<tauri::Url>().map_err(|error| error.to_string())?;
+    tauri::WebviewWindowBuilder::new(&app, CAMPUS_WINDOW, tauri::WebviewUrl::External(url))
+        .title("Campus Unimayor - NOTAZOD")
+        .inner_size(1100.0, 800.0)
+        .initialization_script(CAMPUS_INIT_SCRIPT)
+        // The window only ever shows the Campus.
+        .on_navigation(|url| is_campus_url(url) || url.scheme() == "about")
+        .build()
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+// Evaluates a synchronous script in the Campus window and returns its JSON-serialized result.
+// Refuses to run unless the window is on the Campus host.
+#[tauri::command]
+async fn campus_eval(app: tauri::AppHandle, script: String) -> Result<String, String> {
+    use tauri::Manager;
+
+    let window = app
+        .get_webview_window(CAMPUS_WINDOW)
+        .ok_or_else(|| "The Campus window is closed".to_string())?;
+    let url = window.url().map_err(|error| error.to_string())?;
+    if !is_campus_url(&url) {
+        return Err(format!("The Campus window is not showing the Campus ({url})"));
     }
-    let ego_browser = find_ego_browser()?;
-
-    let work_dir = std::env::temp_dir().join(format!("notazod-campus-upload-{}", std::process::id()));
-    std::fs::create_dir_all(&work_dir).map_err(|error| error.to_string())?;
-    let lib_path = work_dir.join("grades.mjs");
-    std::fs::write(&lib_path, CAMPUS_GRADES_LIB).map_err(|error| error.to_string())?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|error| error.to_string())?
-        .as_nanos();
-    let report_path = work_dir.join(format!("report-{stamp}.json"));
-    let config = serde_json::json!({
-        "dbPath": db_path.to_string_lossy(),
-        "libUrl": format!("file://{}", lib_path.to_string_lossy().replace(' ', "%20")),
-        "save": save,
-        "reportPath": report_path.to_string_lossy(),
-        "courseId": course_id,
-    });
-    let script = format!("const CONFIG = {config};\n{CAMPUS_UPLOAD_SCRIPT}");
-
-    let output = tauri::async_runtime::spawn_blocking(move || {
-        let mut child = std::process::Command::new(ego_browser)
-            .arg("nodejs")
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()?;
-        // Dropping stdin after the write closes it, which starts the script.
-        child
-            .stdin
-            .take()
-            .expect("stdin is piped")
-            .write_all(script.as_bytes())?;
-        child.wait_with_output()
+    let (sender, receiver) = std::sync::mpsc::channel();
+    window
+        .eval_with_callback(script, move |result| {
+            let _ = sender.send(result);
+        })
+        .map_err(|error| error.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        receiver.recv_timeout(std::time::Duration::from_secs(15))
     })
     .await
     .map_err(|error| error.to_string())?
-    .map_err(|error| error.to_string())?;
-
-    let log = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let report = std::fs::read_to_string(&report_path);
-    let _ = std::fs::remove_file(&report_path);
-    match report {
-        Ok(text) => {
-            let mut value: serde_json::Value =
-                serde_json::from_str(&text).map_err(|error| error.to_string())?;
-            value["exitOk"] = serde_json::Value::Bool(output.status.success());
-            value["log"] = serde_json::Value::String(log);
-            Ok(value)
-        }
-        Err(_) => {
-            let tail: Vec<&str> = log.lines().rev().take(12).collect();
-            let tail: Vec<&str> = tail.into_iter().rev().collect();
-            Err(format!("The Campus upload stopped without a report.\n{}", tail.join("\n")))
-        }
-    }
+    .map_err(|_| "The Campus window did not answer".to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -380,7 +334,8 @@ pub fn run() {
             resolve_backup_path,
             stage_restore,
             apply_pending_restore,
-            campus_upload
+            campus_open,
+            campus_eval
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -590,24 +590,15 @@ export async function saveGroupGrade(groupId: string, itemId: string, value: num
   return members.map((member) => ({ studentId: member.studentId, itemId, value, pending }));
 }
 
-export type CampusRow = { code: string; name: string; campus: string; notazod: string; confirmed?: boolean };
-export type CampusGroup = {
-  key: string;
-  status: "verified" | "failed" | "unmatched";
-  inScope: boolean;
-  reason?: string;
-  course?: string;
-  openColumn: number | null;
-  notazodPeriodClosed?: boolean | null;
-  missingCodes?: string[];
-  notInCampus?: string[];
-  rows: CampusRow[];
-  saved?: boolean;
-  saveMessage?: string;
-};
-export type CampusReport = { mode: "dry-run" | "save"; canSave: boolean; groups: CampusGroup[]; stoppedWith?: string; exitOk: boolean; log: string };
-
-// Runs the Campus upload tool for one course. save = false only verifies and previews.
-export async function runCampusUpload(courseId: string, save: boolean): Promise<CampusReport> {
-  return invoke<CampusReport>("campus_upload", { dbName: resolveDatabaseName(), courseId, save });
+// Read-only snapshot of the rows the Campus upload needs (SELECTs only; never creates defaults).
+export async function loadCampusRows() {
+  const db = await getDatabase();
+  const [courses, students, periods, items, grades] = await Promise.all([
+    db.select<{ id: string; name: string }[]>("SELECT id, name FROM courses ORDER BY name"),
+    db.select<{ id: string; courseId: string; fullName: string; code: string }[]>("SELECT id, course_id AS courseId, full_name AS fullName, code FROM students"),
+    db.select<{ id: string; courseId: string; number: number; activityPercent: number; examPercent: number; closed: number }[]>("SELECT id, course_id AS courseId, number, activity_percent AS activityPercent, exam_percent AS examPercent, closed FROM periods"),
+    db.select<{ id: string; periodId: string | null; isExam: number }[]>("SELECT id, period_id AS periodId, is_exam AS isExam FROM grade_items"),
+    db.select<{ studentId: string; itemId: string; value: number; pending: number }[]>("SELECT student_id AS studentId, item_id AS itemId, value, pending FROM grades"),
+  ]);
+  return { courses, students, periods, items, grades };
 }

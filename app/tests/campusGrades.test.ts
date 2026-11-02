@@ -1,10 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { formatGrade, loadNotazod, periodGrade, planUpload, scopeToCourse, verifyGroup } from "./grades.mjs";
+import { buildCampusData, formatGrade, periodGrade, planUpload, scopeToCourse, verifyGroup } from "../src/lib/campusGrades.ts";
 
 const period = { activityPercent: 40, examPercent: 60 };
 const items = [
@@ -95,37 +91,6 @@ test("S4: the plan is savable only when every matched group is verified", () => 
   assert.equal(empty.canSave, false);
 });
 
-test("S3: loadNotazod reads courses and period grades through the public schema", () => {
-  const dir = mkdtempSync(join(tmpdir(), "notazod-campus-"));
-  const path = join(dir, "fixture.db");
-  try {
-    const db = new DatabaseSync(path);
-    db.exec(`
-      CREATE TABLE courses (id TEXT PRIMARY KEY, name TEXT, semester TEXT);
-      CREATE TABLE students (id TEXT PRIMARY KEY, course_id TEXT, full_name TEXT, code TEXT);
-      CREATE TABLE periods (id TEXT PRIMARY KEY, course_id TEXT, number INTEGER, activity_percent INTEGER, exam_percent INTEGER, closed INTEGER);
-      CREATE TABLE grade_items (id TEXT PRIMARY KEY, course_id TEXT, period_id TEXT, name TEXT, is_exam INTEGER, sort_order INTEGER);
-      CREATE TABLE grades (student_id TEXT, item_id TEXT, value REAL, pending INTEGER);
-      INSERT INTO courses VALUES ('c1', 'POO', '2026-2');
-      INSERT INTO students VALUES ('s1', 'c1', 'Ana', '220126027');
-      INSERT INTO periods VALUES ('p2', 'c1', 2, 40, 60, 0);
-      INSERT INTO grade_items VALUES ('i1', 'c1', 'p2', 'Taller', 0, 1), ('i2', 'c1', 'p2', 'Parcial', 1, 2);
-      INSERT INTO grades VALUES ('s1', 'i1', 4.5, 0), ('s1', 'i2', 5, 0);
-    `);
-    db.close();
-    const before = new DatabaseSync(path).prepare("SELECT count(*) AS n FROM grades").get().n;
-    const data = loadNotazod(path);
-    assert.equal(data.courses.length, 1);
-    assert.deepEqual([...data.courses[0].codes], ["220126027"]);
-    // 4.5 * 0.4 + 5 * 0.6 = 4.8
-    assert.equal(formatGrade(data.gradeFor("c1", 2, "220126027")), "4,8");
-    assert.equal(data.gradeFor("c1", 3, "220126027"), null);
-    assert.equal(new DatabaseSync(path).prepare("SELECT count(*) AS n FROM grades").get().n, before);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
 test("S5: a course-scoped upload keeps only the groups of that course", () => {
   const results = [
     { key: "fund-a", status: "verified", courseId: "fund" },
@@ -167,4 +132,20 @@ test("S5: an ambiguous group that could belong to the selected course blocks the
 test("S5: without a course the scope is every group", () => {
   const results = [{ key: "a", status: "verified", courseId: "fund" }, { key: "b", status: "failed", courseId: "poo" }];
   assert.equal(scopeToCourse(results, undefined).length, 2);
+});
+
+test("S3: buildCampusData exposes course codes and period grades from database rows", () => {
+  const data = buildCampusData({
+    courses: [{ id: "c1", name: "POO" }],
+    students: [{ id: "s1", courseId: "c1", fullName: "Ana", code: " 220126027 " }],
+    periods: [{ id: "p2", courseId: "c1", number: 2, activityPercent: 40, examPercent: 60, closed: 1 }],
+    items: [{ id: "i1", periodId: "p2", isExam: 0 }, { id: "i2", periodId: "p2", isExam: 1 }],
+    grades: [{ studentId: "s1", itemId: "i1", value: 4.5, pending: 0 }, { studentId: "s1", itemId: "i2", value: 5, pending: 0 }],
+  });
+  assert.deepEqual([...data.courses[0].codes], ["220126027"]);
+  // 4.5 * 0.4 + 5 * 0.6 = 4.8
+  assert.equal(formatGrade(data.gradeFor("c1", 2, "220126027") ?? -1), "4,8");
+  assert.equal(data.gradeFor("c1", 3, "220126027"), null);
+  assert.equal(data.gradeFor("c1", 2, "999"), null);
+  assert.equal(data.periodInfo("c1", 2)?.closed, 1);
 });

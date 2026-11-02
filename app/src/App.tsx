@@ -27,7 +27,8 @@ import {
   Title,
   useMantineColorScheme,
 } from "@mantine/core";
-import { assignStudentToGroup, copyGroupsFromPeriod, Course, createCourse, createGradeItem, createGroup, createStudent, deleteCourse, deleteGrade, deleteGradeItem, deleteGroup, exportBackup, CampusReport, runCampusUpload, Grade, GradeHistoryEntry, GradeItem, Group as StudentGroup, GroupMembership, initDatabase, listCourses, listGradeHistory, listGradeItems, listGrades, listGroupMemberships, listGroups, listPeriods, listStudents, Period, renameGradeItem, renameGroup, saveGrade, saveGroupGrade, setPeriodClosed, stageRestore, Student, undoLastGrade, updatePeriod } from "./lib/db";
+import { assignStudentToGroup, copyGroupsFromPeriod, Course, createCourse, createGradeItem, createGroup, createStudent, deleteCourse, deleteGrade, deleteGradeItem, deleteGroup, exportBackup, Grade, GradeHistoryEntry, GradeItem, Group as StudentGroup, GroupMembership, initDatabase, listCourses, listGradeHistory, listGradeItems, listGrades, listGroupMemberships, listGroups, listPeriods, listStudents, Period, renameGradeItem, renameGroup, saveGrade, saveGroupGrade, setPeriodClosed, stageRestore, Student, undoLastGrade, updatePeriod } from "./lib/db";
+import { CampusReport, runCampusUpload } from "./lib/campus";
 import { classifyStudentRows, hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
 
 const emptyStudent: StudentDraft = {
@@ -138,6 +139,7 @@ function App() {
   const [campusState, setCampusState] = useState<"idle" | "checking" | "preview" | "saving" | "done" | "error">("idle");
   const [campusReport, setCampusReport] = useState<CampusReport | null>(null);
   const [campusError, setCampusError] = useState("");
+  const [campusStatus, setCampusStatus] = useState("");
   const [activityName, setActivityName] = useState("");
   const [importModal, setImportModal] = useState(false);
   const [guidedModal, setGuidedModal] = useState(false);
@@ -771,9 +773,9 @@ function App() {
 
   async function runCampus(save: boolean) {
     if (!selectedCourse) return;
-    setCampusError(""); setCampusState(save ? "saving" : "checking");
+    setCampusError(""); setCampusStatus(""); setCampusState(save ? "saving" : "checking");
     try {
-      const report = await runCampusUpload(selectedCourse.id, save);
+      const report = await runCampusUpload(selectedCourse.id, save, setCampusStatus);
       setCampusReport(report);
       setCampusState(save ? "done" : "preview");
     } catch (cause) {
@@ -1290,8 +1292,8 @@ function App() {
       <Modal opened={gradeImportModal} onClose={() => { setGradeImportModal(false); setGradeImportData(null); }} title={`Importar notas · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">Subí la plantilla o un Excel con una columna Código y luego las columnas de notas. Primero se analiza; nada se guarda hasta confirmar.</Text><FileButton onChange={handleGradeFile} accept=".csv,.xls,text/csv,application/vnd.ms-excel">{(props) => <Button variant="default" {...props}>Elegir archivo</Button>}</FileButton>{gradeImportData ? <Stack gap="xs"><Text size="sm">{gradeImportData.rows.length} filas · {gradeImportData.gradeHeaders.length} columnas de notas</Text><Text size="sm">Última columna: <b>{gradeImportData.gradeHeaders[gradeImportData.gradeHeaders.length - 1]}</b></Text><Group><Button size="xs" variant={gradeImportLastIsExam ? "filled" : "light"} onClick={() => setGradeImportLastIsExam(true)}>Es Parcial</Button><Button size="xs" variant={!gradeImportLastIsExam ? "filled" : "light"} onClick={() => setGradeImportLastIsExam(false)}>Es actividad</Button></Group><Text size="xs" c="dimmed">{gradeImportData.rows.filter((row) => !students.some((student) => student.code === row.code)).length} códigos no encontrados · {gradeImportData.rows.filter((row) => row.invalid.length).length} filas inválidas</Text><Group justify="flex-end"><Button variant="default" onClick={() => setGradeImportData(null)}>Cambiar archivo</Button><Button onClick={() => void importGrades()} disabled={gradeImportData.rows.length === 0}>Importar y guardar</Button></Group></Stack> : null}</Stack></Modal>
       <Modal opened={campusModal} onClose={() => { if (campusState !== "checking" && campusState !== "saving") setCampusModal(false); }} title={`Subir al Campus · ${selectedCourse?.name ?? ""}`} centered size="xl">
         <Stack>
-          {campusState === "idle" ? <><Text size="sm">NOTAZOD va a abrir el Campus en el navegador, buscar los grupos de este curso y comparar cada estudiante por código. Primero vas a ver una vista previa: nada se guarda hasta que lo confirmes.</Text><Text size="sm" c="dimmed">Si el Campus te pide iniciar sesión, ingresá usuario, contraseña y código en la ventana del navegador y devolvé el control al agente.</Text><Group justify="flex-end"><Button variant="default" onClick={() => setCampusModal(false)}>Cancelar</Button><Button color="green" onClick={() => void runCampus(false)}>Verificar en el Campus</Button></Group></> : null}
-          {campusState === "checking" || campusState === "saving" ? <Group wrap="nowrap"><Loader size="sm" /><Text size="sm">{campusState === "checking" ? "Verificando en el Campus..." : "Guardando en el Campus..."} Si te pide iniciar sesión, hacelo en la ventana del navegador.</Text></Group> : null}
+          {campusState === "idle" ? <><Text size="sm">NOTAZOD va a abrir el Campus en una ventana propia, buscar los grupos de este curso y comparar cada estudiante por código. Primero vas a ver una vista previa: nada se guarda hasta que lo confirmes.</Text><Text size="sm" c="dimmed">Si el Campus te pide iniciar sesión, ingresá usuario, contraseña y código en esa ventana. NOTAZOD sigue solo cuando entrás.</Text><Group justify="flex-end"><Button variant="default" onClick={() => setCampusModal(false)}>Cancelar</Button><Button color="green" onClick={() => void runCampus(false)}>Verificar en el Campus</Button></Group></> : null}
+          {campusState === "checking" || campusState === "saving" ? <Group wrap="nowrap"><Loader size="sm" /><Stack gap={2}><Text size="sm">{campusState === "checking" ? "Verificando en el Campus..." : "Guardando en el Campus..."}</Text>{campusStatus ? <Text size="sm" c="dimmed">{campusStatus}</Text> : null}</Stack></Group> : null}
           {campusState === "error" ? <><Text c="red" size="sm" style={{ whiteSpace: "pre-wrap" }}>{campusError}</Text><Group justify="flex-end"><Button variant="default" onClick={() => setCampusModal(false)}>Cerrar</Button><Button onClick={() => void runCampus(false)}>Reintentar verificación</Button></Group></> : null}
           {(campusState === "preview" || campusState === "done") && campusReport ? (() => {
             const done = campusState === "done";
