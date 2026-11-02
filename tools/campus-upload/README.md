@@ -31,5 +31,5 @@ The NOTAZOD database is opened read-only. Grades use the same formula NOTAZOD di
 ## Tests
 
 ```bash
-node --test tools/campus-upload/
+node --test tools/campus-upload/*.test.mjs
 ```

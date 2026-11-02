@@ -9,13 +9,16 @@ Branch `feature/campus-upload`. Tool lives in `tools/campus-upload/`.
 - S4: User: "cunado este tood se guarda". Grades are saved only when every matched group is verified; if any group fails verification nothing is saved and the failures are reported. After saving, the tool reads the form back and confirms the stored values.
 
 ## Tasks
-- T1 (S3) Read NOTAZOD grades read-only and compute period grades, with tests. Route: inline. Commit: pending
-- T2 (S1, S2) Read Campus groups after human login, verify by course and code, print a dry-run report. Route: inline. Commit: pending
-- T3 (S4) Fill the open column, save only when everything is verified, read back and confirm. Route: inline. Commit: pending
-- T4 Document usage in `tools/campus-upload/README.md`. Route: inline. Commit: pending
+- T1 (S3) Read NOTAZOD grades read-only and compute period grades, with tests. Route: inline. Commit: 18b7842
+- T2 (S1, S2) Read Campus groups after human login, verify by course and code, print a dry-run report. Route: inline. Commit: 1e6dcb5
+- T3 (S4) Fill the open column, save only when everything is verified, read back and confirm. Route: inline. Commit: 1e6dcb5 (save path written; not yet run against the Campus)
+- T4 Document usage in `tools/campus-upload/README.md`. Route: inline. Commit: 1e6dcb5, fix in next commit
 
 ## Log
 - L1: "si la diea es subir al campus y que yo ingres la coantrasena y de ahi to hagas el proceso de verificar y su ir la verificaicon la hacemos por curso y por codigo de estudiantes para darle la nota cunado este tood se guarda"
 - L2: Evidence: Campus names differ from NOTAZOD ("POO" vs "PROGRAMACIÓN ORIENTADA A OBJETOS I"); "Fundamentos de programacion" (13 students) maps to two Campus groups of 6, so matching is by student code, one NOTAZOD course can map to several Campus groups.
 - L3: Evidence: form `wfCalificar.aspx`, inputs `...$nota_examen_{1,2,3}` (maxlength 3, comma decimals), only the open period is editable, `#ContentPlaceHolder1_btnGuardarNotas` is a plain submit with no confirmation dialog. Login has a 9-digit access code (2FA).
 - L4: Decision: the Campus is production (no test Campus), so the tool runs as a dry run by default and saves only with an explicit `--save`. NOTAZOD database path is explicit and opened read-only.
+- L5: Evidence: first dry run read only 6/27, 7/22, 15/18, 2/6 students because the table was read while the page was still streaming. Fixed by waiting for document completion and failing any group whose read count differs from the Campus list total. Second dry run against notazod-test.db: 27, 22, 18, 6, 6 students, all 5 groups verified, database hash unchanged.
+- L6: Evidence: corte 1 computed from NOTAZOD (4,9 / 5,0 / 4,8 for 220126027, 220126014, 220126021) equals the values already stored in the Campus. notazod-test.db is a 2026-10-05 copy without corte 2 grades.
+- L7: Slice boundary: commits 18b7842 + 1e6dcb5 reached ~400 lines; the remaining work (first real --save) is a separate step that needs the user's decision on the source database.
