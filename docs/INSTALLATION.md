@@ -98,7 +98,7 @@ Git branches only separate code. They do not separate the SQLite database file o
 NOTAZOD selects the database filename from the `VITE_NOTAZOD_DB_NAME` environment variable (see `app/.env.example`):
 
 - Unset (local development default): `notazod-dev.db`.
-- Production release build: must explicitly set `VITE_NOTAZOD_DB_NAME=notazod.db`.
+- Production release build: must explicitly set `VITE_NOTAZOD_DB_NAME=notazod.db`. This also applies to a production build made locally (`VITE_NOTAZOD_DB_NAME=notazod.db npx tauri build`); without it the app opens `notazod-dev.db` and does not see the production data.
 
 This keeps development work, including work done on feature branches, out of the production database file.
 
