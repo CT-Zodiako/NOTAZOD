@@ -1,4 +1,4 @@
-import { Student } from "./db";
+import type { Student } from "./db";
 
 export type StudentDraft = Omit<Student, "id" | "courseId">;
 export type StudentValidation = Partial<Record<keyof StudentDraft, string>>;
