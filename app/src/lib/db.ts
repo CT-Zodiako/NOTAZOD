@@ -589,3 +589,25 @@ export async function saveGroupGrade(groupId: string, itemId: string, value: num
 
   return members.map((member) => ({ studentId: member.studentId, itemId, value, pending }));
 }
+
+export type CampusRow = { code: string; name: string; campus: string; notazod: string; confirmed?: boolean };
+export type CampusGroup = {
+  key: string;
+  status: "verified" | "failed" | "unmatched";
+  inScope: boolean;
+  reason?: string;
+  course?: string;
+  openColumn: number | null;
+  notazodPeriodClosed?: boolean | null;
+  missingCodes?: string[];
+  notInCampus?: string[];
+  rows: CampusRow[];
+  saved?: boolean;
+  saveMessage?: string;
+};
+export type CampusReport = { mode: "dry-run" | "save"; canSave: boolean; groups: CampusGroup[]; stoppedWith?: string; exitOk: boolean; log: string };
+
+// Runs the Campus upload tool for one course. save = false only verifies and previews.
+export async function runCampusUpload(courseId: string, save: boolean): Promise<CampusReport> {
+  return invoke<CampusReport>("campus_upload", { dbName: resolveDatabaseName(), courseId, save });
+}

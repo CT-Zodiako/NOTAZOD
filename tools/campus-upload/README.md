@@ -7,6 +7,10 @@ Uploads each student's NOTAZOD **Nota del corte** to the open period column (`No
 - ego-browser (Ego Lite) installed, with `ego-browser nodejs` on the `PATH`.
 - Node.js 22.5 or newer on the `PATH` (`node:sqlite`).
 
+## From NOTAZOD
+
+Open a course and click **Subir al Campus**. NOTAZOD runs this tool for that course only (the script is embedded in the app through the `campus_upload` Tauri command): it first shows the verification preview, and saves only when you click **Guardar en el Campus**. Only the Campus groups of that course are checked and saved.
+
 ## Usage
 
 ```bash
