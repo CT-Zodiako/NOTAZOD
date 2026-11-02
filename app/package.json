@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:staging": "vite --mode staging",
     "build": "tsc && vite build",
     "build:staging": "tsc && vite build --mode staging",
     "preview": "vite preview",
     "tauri": "tauri",
+    "tauri:dev:staging": "tauri dev --config src-tauri/tauri.staging.conf.json",
     "tauri:build:staging": "tauri build --config src-tauri/tauri.staging.conf.json"
   },
   "dependencies": {

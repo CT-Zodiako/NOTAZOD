@@ -3,6 +3,7 @@
   "productName": "NOTAZOD Test",
   "identifier": "com.notazod.desktop.test",
   "build": {
+    "beforeDevCommand": "pnpm dev:staging",
     "beforeBuildCommand": "pnpm build:staging"
   },
   "app": {
