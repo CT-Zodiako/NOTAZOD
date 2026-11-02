@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { buildCampusData, formatGrade, planUpload, scopeToCourse, verifyGroup, type Verification } from "./campusGrades";
+import type { CampusCourseGroup } from "./campusSync";
 import { loadCampusRows } from "./db";
+import type { StudentDraft } from "./validation";
 
 // Drives the Campus inside NOTAZOD's own "campus" window (see campus_open / campus_eval in lib.rs).
 // Scripts sent to the window are synchronous DOM reads and writes; the Campus page cannot call the app.
@@ -210,4 +212,74 @@ export async function runCampusUpload(courseId: string, save: boolean, onStatus:
     try { await evalInCampus(`sessionStorage.removeItem(${JSON.stringify(AUTO_KEY)}); return true;`); } catch { /* window closed */ }
   }
   return report;
+}
+
+// ---- "Sincronizar cursos": read every group of "Información estudiantes" ----
+
+const INFO_URL = `${BASE}Formularios/wfListarGruposInfoA.aspx`;
+const NORMALIZE = `const norm = (text) => String(text || "").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").replace(/\\s+/g, " ").trim().toLowerCase();`;
+
+// The group list: columns are looked up by header so the reader does not depend on their order.
+const LIST_INFO_GROUPS = `${NORMALIZE}
+  const table = [...document.querySelectorAll("table")].find((t) => t.rows.length > 1 && /consultar/.test(norm(t.rows[0].textContent)) && /grupo/.test(norm(t.rows[0].textContent)));
+  if (!table) return null;
+  const header = [...table.rows[0].cells].map((cell) => norm(cell.textContent));
+  const at = (name) => header.findIndex((h) => h.startsWith(name));
+  const [program, group, module, consult] = [at("programa"), at("grupo"), at("comp"), at("consultar")];
+  return [...table.rows].slice(1).map((row, index) => {
+    const text = (i) => (i >= 0 && row.cells[i] ? row.cells[i].textContent.replace(/\\s+/g, " ").trim() : "");
+    const control = row.cells[consult] && row.cells[consult].querySelector("a, input[type=image], input[type=submit], button");
+    return { index, program: text(program), group: text(group), module: text(module), hasControl: !!control };
+  });`;
+
+const READ_INFO_STUDENTS = `${NORMALIZE}
+  const table = [...document.querySelectorAll("table")].find((t) => t.rows.length && /codigo/.test(norm(t.rows[0].textContent)) && /correo 1/.test(norm(t.rows[0].textContent)));
+  if (!table) return null;
+  const header = [...table.rows[0].cells].map((cell) => norm(cell.textContent));
+  const at = (name) => header.indexOf(name);
+  const columns = { fullName: at("nombre"), code: at("codigo"), documentId: at("documento"), institutionalEmail: at("correo 1"), personalEmail: at("correo 2") };
+  if (Object.values(columns).some((i) => i < 0)) throw new Error("Unexpected student table columns: " + header.join(", "));
+  return [...table.rows].slice(1).filter((row) => row.cells.length >= header.length).map((row) =>
+    Object.fromEntries(Object.entries(columns).map(([key, i]) => [key, row.cells[i].textContent.replace(/\\s+/g, " ").trim()])));`;
+
+type InfoGroup = { index: number; program: string; group: string; module: string; hasControl: boolean };
+
+// Reads every Campus group with its students (name, code, document and both emails).
+// expectedCount comes from the grading list when the same group appears there.
+export async function readCampusCourses(onStatus: (message: string) => void): Promise<CampusCourseGroup[]> {
+  onStatus("Abriendo el Campus...");
+  await ensureLoggedIn(onStatus);
+  await openList();
+  const totals = new Map((await evalInCampus<ListedGroup[]>(LIST_GROUPS)).map((g) => [`${g.group} | ${g.module}`, g.total]));
+
+  const openInfo = () => navigate(`location.href = ${JSON.stringify(INFO_URL)}`, `return location.href.startsWith(${JSON.stringify(INFO_URL)});`, "the Información estudiantes list");
+  await openInfo();
+  const groups = await evalInCampus<InfoGroup[] | null>(LIST_INFO_GROUPS);
+  if (!groups) throw new Error("Could not find the group list in Información estudiantes.");
+
+  const result: CampusCourseGroup[] = [];
+  for (const [position, group] of groups.entries()) {
+    onStatus(`Leyendo grupo ${position + 1} de ${groups.length} del Campus...`);
+    if (!group.hasControl) throw new Error(`No "Consultar estudiantes" button for ${group.group}.`);
+    if (position > 0) await openInfo();
+    await navigate(
+      `${NORMALIZE}
+       const table = [...document.querySelectorAll("table")].find((t) => t.rows.length > 1 && /consultar/.test(norm(t.rows[0].textContent)) && /grupo/.test(norm(t.rows[0].textContent)));
+       const consult = [...table.rows[0].cells].findIndex((cell) => norm(cell.textContent).startsWith("consultar"));
+       table.rows[${group.index + 1}].cells[consult].querySelector("a, input[type=image], input[type=submit], button").click()`,
+      `${NORMALIZE} return [...document.querySelectorAll("table")].some((t) => t.rows.length && /correo 1/.test(norm(t.rows[0].textContent)));`,
+      `the students of ${group.group}`,
+    );
+    const students = await evalInCampus<StudentDraft[] | null>(READ_INFO_STUDENTS);
+    if (!students) throw new Error(`Could not read the students of ${group.group}.`);
+    result.push({
+      key: `${group.program} | ${group.group} | ${group.module}`,
+      program: group.program,
+      group: group.group,
+      module: group.module,
+      students,
+      expectedCount: totals.get(`${group.group} | ${group.module}`) ?? null,
+    });
+  }
+  return result;
 }

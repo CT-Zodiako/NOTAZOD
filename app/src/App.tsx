@@ -27,8 +27,9 @@ import {
   Title,
   useMantineColorScheme,
 } from "@mantine/core";
-import { assignStudentToGroup, copyGroupsFromPeriod, Course, createCourse, createGradeItem, createGroup, createStudent, deleteCourse, deleteGrade, deleteGradeItem, deleteGroup, exportBackup, Grade, GradeHistoryEntry, GradeItem, Group as StudentGroup, GroupMembership, initDatabase, listCourses, listGradeHistory, listGradeItems, listGrades, listGroupMemberships, listGroups, listPeriods, listStudents, Period, renameGradeItem, renameGroup, saveGrade, saveGroupGrade, setPeriodClosed, stageRestore, Student, undoLastGrade, updatePeriod } from "./lib/db";
-import { CampusReport, openCampusWindow, runCampusUpload } from "./lib/campus";
+import { assignStudentToGroup, copyGroupsFromPeriod, Course, createCourse, createGradeItem, createGroup, createStudent, deleteCourse, deleteGrade, applyCourseSync, deleteGradeItem, deleteGroup, exportBackup, loadSyncCourses, SyncResult, Grade, GradeHistoryEntry, GradeItem, Group as StudentGroup, GroupMembership, initDatabase, listCourses, listGradeHistory, listGradeItems, listGrades, listGroupMemberships, listGroups, listPeriods, listStudents, Period, renameGradeItem, renameGroup, saveGrade, saveGroupGrade, setPeriodClosed, stageRestore, Student, undoLastGrade, updatePeriod } from "./lib/db";
+import { CampusReport, openCampusWindow, readCampusCourses, runCampusUpload } from "./lib/campus";
+import { currentSemester, planCourseSync, SyncAction } from "./lib/campusSync";
 import { classifyStudentRows, hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
 
 const emptyStudent: StudentDraft = {
@@ -140,6 +141,11 @@ function App() {
   const [campusReport, setCampusReport] = useState<CampusReport | null>(null);
   const [campusError, setCampusError] = useState("");
   const [campusStatus, setCampusStatus] = useState("");
+  const [syncModal, setSyncModal] = useState(false);
+  const [syncState, setSyncState] = useState<"idle" | "reading" | "preview" | "applying" | "done" | "error">("idle");
+  const [syncPlan, setSyncPlan] = useState<SyncAction[]>([]);
+  const [syncResults, setSyncResults] = useState<SyncResult[]>([]);
+  const [syncError, setSyncError] = useState("");
   const [activityName, setActivityName] = useState("");
   const [importModal, setImportModal] = useState(false);
   const [guidedModal, setGuidedModal] = useState(false);
@@ -767,6 +773,28 @@ function App() {
     } catch { setError("No se pudo eliminar la actividad. Verificá que el corte esté abierto."); }
   }
 
+  function openCourseSync() {
+    setSyncPlan([]); setSyncResults([]); setSyncError(""); setCampusStatus(""); setSyncState("idle"); setSyncModal(true);
+  }
+
+  async function readCourseSync() {
+    setSyncError(""); setCampusStatus(""); setSyncState("reading");
+    try {
+      const groups = await readCampusCourses(setCampusStatus);
+      setSyncPlan(planCourseSync(groups, await loadSyncCourses(), currentSemester()));
+      setSyncState("preview");
+    } catch (cause) { setSyncError(cause instanceof Error ? cause.message : String(cause)); setSyncState("error"); }
+  }
+
+  async function applySync() {
+    setSyncState("applying");
+    try {
+      setSyncResults(await applyCourseSync(syncPlan));
+      setCourses(await listCourses());
+      setSyncState("done");
+    } catch (cause) { setSyncError(cause instanceof Error ? cause.message : String(cause)); setSyncState("error"); }
+  }
+
   function openCampusUpload() {
     setCampusReport(null); setCampusError(""); setCampusState("idle"); setCampusModal(true);
   }
@@ -1148,7 +1176,7 @@ function App() {
               <div><Title order={1}>{selectedCourse ? selectedCourse.name : "Tus cursos"}</Title></div>
               <Group>
                 {selectedCourse ? <><Button variant="default" onClick={() => { setSelectedCourse(null); setGroups([]); setMemberships([]); setViewMode("list"); }}>Volver a cursos</Button><Button variant="subtle" color="red" onClick={() => setDeleteCourseModal(true)}>Eliminar curso</Button></> : null}
-                {!selectedCourse ? <Button onClick={() => setCourseModal(true)}>Crear curso</Button> : null}
+                {!selectedCourse ? <><Button variant="light" color="green" onClick={openCourseSync}>Sincronizar cursos</Button><Button onClick={() => setCourseModal(true)}>Crear curso</Button></> : null}
               </Group>
             </Group>
             {error ? <Text c="red" role="alert">{error}</Text> : null}
@@ -1291,6 +1319,29 @@ function App() {
       <Modal opened={exportModal} onClose={() => setExportModal(false)} title={`Elegir columnas · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">Elegí qué información querés incluir en la imagen.</Text>{exportColumnOptions.map((column) => <Checkbox key={column.key} label={column.label} checked={exportColumns.includes(column.key)} onChange={(event) => { const checked = event.currentTarget.checked; setExportColumns((current) => { const safeCurrent = Array.isArray(current) ? current.filter((value): value is string => typeof value === "string") : []; return checked ? safeCurrent.includes(column.key) ? safeCurrent : [...safeCurrent, column.key] : safeCurrent.filter((key) => key !== column.key); }); }} />)}{exportError ? <Text size="sm" c="red">{exportError}</Text> : null}<Group justify="flex-end"><Button variant="default" onClick={() => setExportModal(false)}>Cancelar</Button><Button disabled={!hasExportSelection} onClick={exportPeriodImage}>Descargar imagen</Button></Group></Stack></Modal>
       <Modal opened={guidedModal} onClose={() => setGuidedModal(false)} title="Carga guiada desde Excel" centered size="lg"><Stack><Text size="sm" c="dimmed">Copiá una columna completa en Excel y pegala acá. La cantidad de filas se detecta automáticamente.</Text>{guidedStage === "students" ? <><Title order={4}>{guidedFields[guidedFieldIndex]}</Title><Textarea minRows={8} value={guidedPaste} onChange={(event) => setGuidedPaste(event.currentTarget.value)} placeholder="Ctrl+V acá" autoFocus /><Button onClick={acceptGuidedStudentColumn}>{guidedFieldIndex === guidedFields.length - 1 ? "Continuar con actividades" : "Siguiente columna"}</Button></> : null}{guidedStage === "activity" ? <><Title order={4}>Actividad {guidedGrades.filter((item) => !item.exam).length + 1}</Title>{guidedGrades.filter((item) => !item.exam).map((item, index) => <Group key={`${item.name}-${index}`} justify="space-between"><Text size="sm">{item.name} · {item.values.length} notas cargadas</Text><Button size="xs" color="red" variant="subtle" onClick={() => removeGuidedActivity(index)}>Quitar</Button></Group>)}<TextInput label="Nombre de la actividad" value={guidedActivityName} onChange={(event) => setGuidedActivityName(event.currentTarget.value)} /><Textarea minRows={8} label="Notas, una por línea" value={guidedPaste} onChange={(event) => setGuidedPaste(event.currentTarget.value)} placeholder="Ctrl+V acá" /><Group><Button onClick={() => acceptGuidedActivity(false)}>Agregar otra actividad</Button><Button onClick={goToGuidedExam}>Agregar parcial</Button><Button variant="filled" onClick={saveGuidedWithoutExam}>Guardar carga</Button></Group></> : null}{guidedStage === "exam" ? <><Title order={4}>Agregar parcial</Title><Text size="sm" c="dimmed">El parcial se carga como una única nota. El cálculo interno lo hacés por fuera.</Text><Textarea minRows={8} label="Notas del parcial, una por línea" value={guidedPaste} onChange={(event) => setGuidedPaste(event.currentTarget.value)} placeholder="Ctrl+V acá" /><Group><Button variant="default" onClick={() => { setGuidedStage("activity"); setGuidedPaste(""); }}>Volver a actividades</Button><Button variant="default" onClick={skipGuidedExam}>Omitir parcial</Button><Button onClick={acceptGuidedExam}>Agregar parcial</Button></Group></> : null}{guidedStage === "preview" ? <><Title order={4}>Revisar carga</Title><Text>{guidedColumns[0]?.length ?? 0} estudiantes · {guidedGrades.length} columnas de notas</Text><Text size="sm">{guidedGrades.map((item) => item.name).join(" · ")}</Text><Group><Button variant="default" onClick={() => setGuidedStage(guidedGrades.some((item) => item.exam) ? "exam" : "activity")}>Volver</Button><Button onClick={() => void persistGuidedImport()}>Guardar carga</Button></Group></> : null}{guidedError ? <Text c="red">{guidedError}</Text> : null}</Stack></Modal>
       <Modal opened={gradeImportModal} onClose={() => { setGradeImportModal(false); setGradeImportData(null); }} title={`Importar notas · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">Subí la plantilla o un Excel con una columna Código y luego las columnas de notas. Primero se analiza; nada se guarda hasta confirmar.</Text><FileButton onChange={handleGradeFile} accept=".csv,.xls,text/csv,application/vnd.ms-excel">{(props) => <Button variant="default" {...props}>Elegir archivo</Button>}</FileButton>{gradeImportData ? <Stack gap="xs"><Text size="sm">{gradeImportData.rows.length} filas · {gradeImportData.gradeHeaders.length} columnas de notas</Text><Text size="sm">Última columna: <b>{gradeImportData.gradeHeaders[gradeImportData.gradeHeaders.length - 1]}</b></Text><Group><Button size="xs" variant={gradeImportLastIsExam ? "filled" : "light"} onClick={() => setGradeImportLastIsExam(true)}>Es Parcial</Button><Button size="xs" variant={!gradeImportLastIsExam ? "filled" : "light"} onClick={() => setGradeImportLastIsExam(false)}>Es actividad</Button></Group><Text size="xs" c="dimmed">{gradeImportData.rows.filter((row) => !students.some((student) => student.code === row.code)).length} códigos no encontrados · {gradeImportData.rows.filter((row) => row.invalid.length).length} filas inválidas</Text><Group justify="flex-end"><Button variant="default" onClick={() => setGradeImportData(null)}>Cambiar archivo</Button><Button onClick={() => void importGrades()} disabled={gradeImportData.rows.length === 0}>Importar y guardar</Button></Group></Stack> : null}</Stack></Modal>
+      <Modal opened={syncModal} onClose={() => { if (syncState !== "reading" && syncState !== "applying") setSyncModal(false); }} title="Sincronizar cursos desde el Campus" centered size="xl">
+        <Stack>
+          {syncState === "idle" ? <><Text size="sm">NOTAZOD va a leer cada grupo de "Información estudiantes" del Campus. Los grupos que ya tenés como curso solo suman los estudiantes que falten; los demás se crean como cursos nuevos del semestre {currentSemester()}. No se borra ni se modifica nada.</Text><Text size="sm" c="dimmed">Primero vas a ver una vista previa. Si el Campus te pide iniciar sesión, hacelo en su ventana.</Text><Group justify="flex-end"><Button variant="default" onClick={() => setSyncModal(false)}>Cancelar</Button><Button color="green" onClick={() => void readCourseSync()}>Leer el Campus</Button></Group></> : null}
+          {syncState === "reading" || syncState === "applying" ? <Group wrap="nowrap"><Loader size="sm" /><Stack gap={2}><Text size="sm">{syncState === "reading" ? "Leyendo el Campus..." : "Creando cursos y estudiantes..."}</Text>{syncState === "reading" && campusStatus ? <Text size="sm" c="dimmed">{campusStatus}</Text> : null}</Stack></Group> : null}
+          {syncState === "error" ? <><Text c="red" size="sm" style={{ whiteSpace: "pre-wrap" }}>{syncError}</Text><Group justify="flex-end"><Button variant="default" onClick={() => setSyncModal(false)}>Cerrar</Button><Button onClick={() => void readCourseSync()}>Reintentar</Button></Group></> : null}
+          {syncState === "preview" ? (() => {
+            const pending = syncPlan.filter((action) => action.kind !== "conflict" && (action.kind === "create" || action.toAdd.length));
+            const students = pending.reduce((sum, action) => sum + (action.kind === "conflict" ? 0 : action.toAdd.length), 0);
+            return <>
+              {syncPlan.map((action) => <Card key={action.groupKeys.join("+")} withBorder><Stack gap="xs">
+                <Group justify="space-between" wrap="nowrap"><Text fw={700} size="sm">{action.kind === "conflict" ? action.groupKeys[0] : action.courseName}</Text><Badge color={action.kind === "create" ? "blue" : action.kind === "conflict" ? "red" : action.toAdd.length ? "green" : "gray"}>{action.kind === "create" ? "Curso nuevo" : action.kind === "conflict" ? "No se toca" : action.toAdd.length ? `Agregar ${action.toAdd.length}` : "Al día"}</Badge></Group>
+                {action.kind !== "conflict" ? <Text size="xs" c="dimmed">Grupos del Campus: {action.groupKeys.join(" · ")}</Text> : <Text size="sm" c="red">{action.reason}</Text>}
+                {action.kind !== "conflict" && action.toAdd.length ? <Table striped withTableBorder><Table.Thead><Table.Tr><Table.Th>Código</Table.Th><Table.Th>Nombre</Table.Th><Table.Th>Documento</Table.Th><Table.Th>Correo institucional</Table.Th><Table.Th>Correo personal</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{action.toAdd.map((student) => <Table.Tr key={student.code}><Table.Td>{student.code}</Table.Td><Table.Td>{student.fullName}</Table.Td><Table.Td>{student.documentId}</Table.Td><Table.Td>{student.institutionalEmail}</Table.Td><Table.Td>{student.personalEmail}</Table.Td></Table.Tr>)}</Table.Tbody></Table> : null}
+                {action.kind !== "conflict" && action.skipped.length ? <Text size="sm" c="orange">No se agregan: {action.skipped.map((item) => `${item.row.code || item.row.fullName} (${item.reason})`).join("; ")}</Text> : null}
+                {action.kind === "add" && action.notInCampus.length ? <Text size="sm" c="orange">En NOTAZOD pero no en el Campus (no se borran): {action.notInCampus.join(", ")}</Text> : null}
+              </Stack></Card>)}
+              <Text size="sm">{pending.length ? `Se van a crear o completar ${pending.length} curso${pending.length === 1 ? "" : "s"} con ${students} estudiante${students === 1 ? "" : "s"}. Antes se guarda una copia de seguridad.` : "No hay nada para agregar: tus cursos ya están al día."}</Text>
+              <Group justify="flex-end"><Button variant="default" onClick={() => setSyncModal(false)}>Cancelar</Button><Button color="green" disabled={!pending.length} onClick={() => void applySync()}>Crear y agregar</Button></Group>
+            </>;
+          })() : null}
+          {syncState === "done" ? <>{syncResults.map((result) => <Text key={result.courseName} size="sm" c={result.failed.length ? "orange" : undefined}>{result.courseName}: {result.created ? "curso creado, " : ""}{result.added} estudiante{result.added === 1 ? "" : "s"} agregado{result.added === 1 ? "" : "s"}{result.failed.length ? ` · no se pudieron agregar: ${result.failed.map((item) => item.code).join(", ")}` : ""}</Text>)}<Group justify="flex-end"><Button onClick={() => setSyncModal(false)}>Cerrar</Button></Group></> : null}
+        </Stack>
+      </Modal>
       <Modal opened={campusModal} onClose={() => { if (campusState !== "checking" && campusState !== "saving") setCampusModal(false); }} title={`Subir al Campus · ${selectedCourse?.name ?? ""}`} centered size="xl">
         <Stack>
           {campusState === "idle" ? <><Text size="sm">NOTAZOD va a abrir el Campus en una ventana propia, buscar los grupos de este curso y comparar cada estudiante por código. Primero vas a ver una vista previa: nada se guarda hasta que lo confirmes.</Text><Text size="sm" c="dimmed">Si el Campus te pide iniciar sesión, ingresá usuario, contraseña y código en esa ventana. NOTAZOD sigue solo cuando entrás.</Text><Group justify="flex-end"><Button variant="default" onClick={() => setCampusModal(false)}>Cancelar</Button><Button color="green" onClick={() => void runCampus(false)}>Verificar en el Campus</Button></Group></> : null}

@@ -1,5 +1,6 @@
 import Database from "@tauri-apps/plugin-sql";
 import { invoke } from "@tauri-apps/api/core";
+import type { ExistingCourse, SyncAction } from "./campusSync";
 
 export type Course = {
   id: string;
@@ -601,4 +602,32 @@ export async function loadCampusRows() {
     db.select<{ studentId: string; itemId: string; value: number; pending: number }[]>("SELECT student_id AS studentId, item_id AS itemId, value, pending FROM grades"),
   ]);
   return { courses, students, periods, items, grades };
+}
+
+// Courses with their students for "Sincronizar cursos" (SELECTs only).
+export async function loadSyncCourses(): Promise<ExistingCourse[]> {
+  const courses = await listCourses();
+  return Promise.all(courses.map(async (course) => ({ id: course.id, name: course.name, semester: course.semester, students: await listStudents(course.id) })));
+}
+
+export type SyncResult = { courseName: string; created: boolean; added: number; failed: { code: string; reason: string }[] };
+
+// Applies a confirmed sync plan: creates courses and adds students; never deletes or edits.
+// An internal backup is taken first. A failing student is reported and the rest continue.
+export async function applyCourseSync(plan: SyncAction[]): Promise<SyncResult[]> {
+  const db = await getDatabase();
+  await createInternalBackup(db);
+  const results: SyncResult[] = [];
+  for (const action of plan) {
+    if (action.kind === "conflict") continue;
+    if (!action.toAdd.length && action.kind === "add") continue;
+    const courseId = action.kind === "create" ? (await createCourse(action.courseName, action.semester)).id : action.courseId;
+    const result: SyncResult = { courseName: action.courseName, created: action.kind === "create", added: 0, failed: [] };
+    for (const student of action.toAdd) {
+      try { await createStudent({ ...student, courseId }); result.added++; }
+      catch (error) { result.failed.push({ code: student.code, reason: error instanceof Error ? error.message : String(error) }); }
+    }
+    results.push(result);
+  }
+  return results;
 }
