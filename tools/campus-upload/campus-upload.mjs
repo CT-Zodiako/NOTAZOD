@@ -51,6 +51,20 @@ async function openGroup(group) {
   await page.waitForFunction(() => document.readyState === "complete" && !!document.querySelector("#ContentPlaceHolder1_btnGuardarNotas"), undefined, { timeout: 30_000 });
 }
 
+const normalizeText = (text) => String(text ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[¿?]/g, "").trim();
+const dialogMessage = (dialog) => dialog?.message ?? dialog?.text ?? "";
+
+// Polls the page for an open JavaScript dialog (confirm or alert) and returns it, or null after the timeout.
+async function waitForDialog(timeout) {
+  const end = Date.now() + timeout;
+  while (Date.now() < end) {
+    const { dialog } = await page.info();
+    if (dialog) return dialog;
+    await page.waitForTimeout(200);
+  }
+  return null;
+}
+
 // Reads the grading form: one row per student with its three period inputs.
 const readForm = () => page.evaluate(() => {
   const table = document.getElementById("ContentPlaceHolder1_gvEstudiantes");
@@ -138,7 +152,19 @@ if (!CONFIG.save || !plan.canSave) {
     if (!typedOk) throw new Error(`Typed values did not stick for ${g.key}; stopped before saving it.`);
     await page.click(SAVE_BUTTON, { label: "save grades" });
     g.saveClicked = true;
+    // The Campus asks "¿Esta seguro?" before saving; accept only that confirmation.
+    const confirm = await waitForDialog(5_000);
+    if (!confirm) throw new Error(`The Campus did not ask for the save confirmation for ${g.key}; check that group by hand.`);
+    if (!/esta seguro/i.test(normalizeText(dialogMessage(confirm)))) {
+      await page.dismissDialog();
+      throw new Error(`Unexpected Campus dialog "${dialogMessage(confirm)}" for ${g.key}; it was dismissed and nothing more was saved.`);
+    }
+    g.confirmMessage = dialogMessage(confirm);
+    await page.acceptDialog();
     await page.waitForLoadState();
+    // A message after the save (alert) is recorded and closed so the run can continue.
+    const after = await waitForDialog(3_000);
+    if (after) { g.afterSaveDialog = dialogMessage(after); await page.acceptDialog(); await page.waitForLoadState(); }
     g.saveMessage = await page.evaluate(() => (document.querySelector(".swal2-popup, .alert-success, .alert-danger, [id*='lblMensaje']")?.textContent ?? "").trim().replace(/\s+/g, " "));
     await openGroup(g.group);
     const stored = await readForm();
