@@ -12,12 +12,12 @@ Branch `feature/campus-upload`. Tool lives in `tools/campus-upload/`.
 ## Tasks
 - T1 (S3) Read NOTAZOD grades read-only and compute period grades, with tests. Route: inline. Commit: 18b7842
 - T2 (S1, S2) Read Campus groups after human login, verify by course and code, print a dry-run report. Route: inline. Commit: 1e6dcb5
-- T3 (S4) Fill the open column, save only when everything is verified, read back and confirm. Route: inline. Commit: 1e6dcb5 (save path written; not yet run against the Campus)
+- T3 (S4) Fill the open column, save only when everything is verified, read back and confirm. Route: inline. Commit: 1e6dcb5, 8d21527 (save confirmed in the Campus for Fundamentos)
 - T4 Document usage in `tools/campus-upload/README.md`. Route: inline. Commit: 1e6dcb5, fix in next commit
 
-- T5 (S5) Course-scoped upload in the tool (`courseId`), with tests. Route: inline. Commit: pending
-- T6 (S5) Tauri command that runs the embedded tool through ego-browser and returns the report. Route: inline. Commit: pending
-- T7 (S5) "Subir al Campus" button, preview and confirm in App.tsx; first real save with Fundamentos de programacion. Route: inline. Commit: pending
+- T5 (S5) Course-scoped upload in the tool (`courseId`), with tests. Route: inline. Commit: 05b3ca7
+- T6 (S5) Tauri command that runs the embedded tool through ego-browser and returns the report. Route: inline. Commit: 75ed500
+- T7 (S5) "Subir al Campus" button, preview and confirm in App.tsx; first real save with Fundamentos de programacion. Route: inline. Commit: 75ed500, 8d21527
 
 ## Log
 - L1: "si la diea es subir al campus y que yo ingres la coantrasena y de ahi to hagas el proceso de verificar y su ir la verificaicon la hacemos por curso y por codigo de estudiantes para darle la nota cunado este tood se guarda"
@@ -31,3 +31,4 @@ Branch `feature/campus-upload`. Tool lives in `tools/campus-upload/`.
 - L9: "probemos co nel de fundamentos dep rogramacion pero que la preuba sea desde el boton"
 - L10: Slice boundary: commits 5bdb97b (staging dev command) and 5bc7279 (delete activities, image export) are earlier unrelated work committed apart; the button is a new slice.
 - L11: User: "me sali oese error yo le dei aceptar ten encuenta ese acpetar para que lo des tu y no pare el proseso". Evidence: the Campus save button opens a confirm "¿Esta seguro?"; the first button run stopped there. After the user accepted by hand, GRUPO B DIURNO stored exactly the previewed values (2,8 1,0 3,9 3,7 0,7 3,9) and GRUPO B TARDE stayed at 0,0. Fix: the tool accepts only that confirmation, dismisses and stops on any other dialog, and records/closes a post-save alert.
+- L12: User: "quedo bien, vmaos a pasarlo a main". Evidence: GRUPO B DIURNO read back from the Campus with the previewed values; GRUPO B TARDE confirmed by the user from the button run (agent read-back blocked because the user held browser control). Tests 18/18, tsc OK. Merged to main locally (release only runs on v* tags).
