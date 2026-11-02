@@ -61,6 +61,11 @@ async function navigate(trigger: string, ready: string, what: string) {
   await waitFor(`return document.readyState === "complete" && !window.__notazodOldPage && (function(){ ${ready} })();`, PAGE_TIMEOUT, what);
 }
 
+// Opens (or focuses) the NOTAZOD Campus window so the teacher can browse the Campus directly.
+export async function openCampusWindow() {
+  await invoke("campus_open");
+}
+
 async function ensureLoggedIn(onStatus: (message: string) => void) {
   await invoke("campus_open");
   const end = Date.now() + LOGIN_TIMEOUT;

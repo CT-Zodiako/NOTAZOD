@@ -28,7 +28,7 @@ import {
   useMantineColorScheme,
 } from "@mantine/core";
 import { assignStudentToGroup, copyGroupsFromPeriod, Course, createCourse, createGradeItem, createGroup, createStudent, deleteCourse, deleteGrade, deleteGradeItem, deleteGroup, exportBackup, Grade, GradeHistoryEntry, GradeItem, Group as StudentGroup, GroupMembership, initDatabase, listCourses, listGradeHistory, listGradeItems, listGrades, listGroupMemberships, listGroups, listPeriods, listStudents, Period, renameGradeItem, renameGroup, saveGrade, saveGroupGrade, setPeriodClosed, stageRestore, Student, undoLastGrade, updatePeriod } from "./lib/db";
-import { CampusReport, runCampusUpload } from "./lib/campus";
+import { CampusReport, openCampusWindow, runCampusUpload } from "./lib/campus";
 import { classifyStudentRows, hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
 
 const emptyStudent: StudentDraft = {
@@ -1132,7 +1132,7 @@ function App() {
             <img className="brand-logo" src="/branding/notazod-logo.png" alt="NOTAZOD" />
           </Group>
           <Group gap="xs">
-            <Button variant="light" color="green" size="xs" onClick={() => void openUrl("https://campus2.unimayor.edu.co/CampusRegistroNotas/Sesion/wfInicio.aspx?ReturnUrl=%2fCampusRegistroNotas")} aria-label="Abrir el Campus de Unimayor en el navegador">Abrir Campus</Button>
+            <Button variant="light" color="green" size="xs" onClick={() => void openCampusWindow()} aria-label="Abrir el Campus de Unimayor en una ventana de NOTAZOD">Abrir Campus</Button>
             <Button variant="subtle" size="xs" onClick={() => void handleExportBackup()} aria-label="Exportar copia de seguridad de NOTAZOD">Exportar copia de seguridad</Button>
             <Button variant="subtle" size="xs" onClick={() => void handleRestoreBackup()} aria-label="Restaurar copia de seguridad de NOTAZOD">Restaurar copia de seguridad</Button>
             <Button variant="subtle" size="xs" onClick={() => void checkForUpdates()} aria-label="Buscar actualizaciones de NOTAZOD">Buscar actualizaciones</Button>
