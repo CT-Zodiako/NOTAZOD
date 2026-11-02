@@ -65,6 +65,16 @@ test("S2: a group whose codes are spread across courses fails", () => {
   assert.equal(result.status, "failed");
 });
 
+test("S2: a group whose codes all belong to more than one NOTAZOD course fails as ambiguous", () => {
+  const overlapping = [
+    { id: "poo1", name: "A POO I", codes: new Set(["1", "2", "3", "4"]) },
+    { id: "poo2", name: "B POO II", codes: new Set(["1", "2", "3"]) },
+  ];
+  const result = verifyGroup({ name: "G7", codes: ["1", "2", "3"], openColumn: 2 }, overlapping);
+  assert.equal(result.status, "failed");
+  assert.match(result.reason, /more than one NOTAZOD course/);
+});
+
 test("S2: a group with no code in NOTAZOD is unmatched, not failed", () => {
   const result = verifyGroup({ name: "G5", codes: ["500", "501"], openColumn: 2 }, courses);
   assert.equal(result.status, "unmatched");

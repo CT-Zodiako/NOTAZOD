@@ -23,7 +23,9 @@ export function formatGrade(value) {
 export function verifyGroup(group, courses) {
   const touched = courses.filter((course) => group.codes.some((code) => course.codes.has(code)));
   if (!touched.length) return { status: "unmatched" };
-  const course = touched.find((candidate) => group.codes.every((code) => candidate.codes.has(code)))
+  const complete = touched.filter((candidate) => group.codes.every((code) => candidate.codes.has(code)));
+  if (complete.length > 1) return { status: "failed", courseId: null, candidates: complete.map((c) => c.name), missingCodes: [], notInCampus: [], reason: `student codes match more than one NOTAZOD course: ${complete.map((c) => c.name).join(", ")}` };
+  const course = complete[0]
     ?? touched.reduce((best, candidate) => countIn(group.codes, candidate) > countIn(group.codes, best) ? candidate : best);
   const missingCodes = group.codes.filter((code) => !course.codes.has(code));
   const notInCampus = [...course.codes].filter((code) => !group.codes.includes(code));

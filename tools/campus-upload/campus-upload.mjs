@@ -121,6 +121,8 @@ if (!CONFIG.save || !plan.canSave) {
   console.log(`Report: ${CONFIG.reportPath}`);
 } else {
   // S4: everything verified. Fill each verified group, save, then read it back.
+  // The report is written even when a later group stops, so earlier saves stay on record.
+  try {
   for (const g of report.groups.filter((entry) => entry.status === "verified")) {
     await openGroup(g.group);
     const form = await readForm();
@@ -131,12 +133,19 @@ if (!CONFIG.save || !plan.canSave) {
     const typedOk = g.rows.every((r, i) => typed.rows[i].inputs[g.openColumn - 1].value === r.notazod);
     if (!typedOk) throw new Error(`Typed values did not stick for ${g.key}; stopped before saving it.`);
     await page.click(SAVE_BUTTON, { label: "save grades" });
+    g.saveClicked = true;
     await page.waitForLoadState();
     g.saveMessage = await page.evaluate(() => (document.querySelector(".swal2-popup, .alert-success, .alert-danger, [id*='lblMensaje']")?.textContent ?? "").trim().replace(/\s+/g, " "));
     await openGroup(g.group);
     const stored = await readForm();
     for (const [i, r] of g.rows.entries()) r.confirmed = stored.rows[i]?.code === r.code && stored.rows[i].inputs[g.openColumn - 1].value === r.notazod;
     g.saved = g.rows.every((r) => r.confirmed);
+  }
+  } catch (error) {
+    report.stoppedWith = String(error?.message ?? error);
+    await writeFile(CONFIG.reportPath, JSON.stringify(report, null, 2));
+    console.log(`STOPPED: ${report.stoppedWith}\nGroups saved before stopping: ${report.groups.filter((g) => g.saveClicked).map((g) => g.key).join("; ") || "none"}\nReport: ${CONFIG.reportPath}`);
+    throw error;
   }
   printReport();
   for (const g of report.groups.filter((entry) => entry.status === "verified")) console.log(`\n${g.saved ? "SAVED AND CONFIRMED" : "SAVE NOT CONFIRMED"}: ${g.key}${g.saveMessage ? ` (${g.saveMessage})` : ""}`);
