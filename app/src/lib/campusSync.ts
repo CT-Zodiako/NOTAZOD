@@ -10,12 +10,18 @@ export type CampusCourseGroup = {
   module: string;
   students: StudentDraft[];
   expectedCount: number | null;
+  // Campus grading form: the open period column, and the values of the periods before it.
+  openColumn?: number | null;
+  pastGrades?: { period: number; values: Record<string, string> }[];
 };
-export type ExistingCourse = { id: string; name: string; semester: string; students: Student[] };
+// gradedPeriods: period numbers that already have at least one grade in NOTAZOD.
+export type ExistingCourse = { id: string; name: string; semester: string; students: Student[]; gradedPeriods?: number[] };
+export type PeriodImport = { period: number; grades: { code: string; value: number }[] };
+export type PeriodSkip = { period: number; reason: string };
 export type SkippedStudent = { row: StudentDraft; reason: string };
 export type SyncAction =
-  | { kind: "create"; groupKeys: string[]; courseName: string; semester: string; toAdd: StudentDraft[]; skipped: SkippedStudent[] }
-  | { kind: "add"; groupKeys: string[]; courseId: string; courseName: string; toAdd: StudentDraft[]; skipped: SkippedStudent[]; notInCampus: string[] }
+  | { kind: "create"; groupKeys: string[]; courseName: string; semester: string; toAdd: StudentDraft[]; skipped: SkippedStudent[]; periodImports: PeriodImport[]; periodSkips: PeriodSkip[] }
+  | { kind: "add"; groupKeys: string[]; courseId: string; courseName: string; toAdd: StudentDraft[]; skipped: SkippedStudent[]; notInCampus: string[]; periodImports: PeriodImport[]; periodSkips: PeriodSkip[] }
   | { kind: "conflict"; groupKeys: string[]; reason: string };
 
 // Same convention as the existing courses: first half of the year is "-1", second half "-2".
@@ -48,6 +54,35 @@ function matchCourse(group: CampusCourseGroup, courses: ExistingCourse[]) {
   return { kind: "match" as const, course: best.course };
 }
 
+// S4: past Campus periods (columns before the open one) are imported only into NOTAZOD periods
+// that have no grades yet, and only for students that end up in the course.
+function planPeriodImports(groups: CampusCourseGroup[], courseCodes: Set<string>, gradedPeriods: number[]) {
+  const periodImports: PeriodImport[] = [];
+  const periodSkips: PeriodSkip[] = [];
+  if (groups.some((g) => g.openColumn === null)) {
+    periodSkips.push({ period: 0, reason: "no se pudo identificar el corte abierto en el Campus; no se importan notas" });
+    return { periodImports, periodSkips };
+  }
+  const periods = [...new Set(groups.flatMap((g) => (g.pastGrades ?? []).map((p) => p.period)))].sort((a, b) => a - b);
+  for (const period of periods) {
+    if (gradedPeriods.includes(period)) { periodSkips.push({ period, reason: `NOTAZOD ya tiene notas en el corte ${period}; no se modifica` }); continue; }
+    const grades: { code: string; value: number }[] = [];
+    for (const group of groups) {
+      const values = group.pastGrades?.find((p) => p.period === period)?.values ?? {};
+      for (const student of group.students) {
+        const code = codeOf(student);
+        const raw = values[code];
+        if (raw === undefined || !courseCodes.has(code) || grades.some((g) => g.code === code)) continue;
+        const value = /^\d(?:,\d)?$/.test(raw.trim()) ? Number(raw.trim().replace(",", ".")) : NaN;
+        if (Number.isNaN(value) || value > 5) { periodSkips.push({ period, reason: `valor no válido para ${code}: ${raw}` }); continue; }
+        grades.push({ code, value });
+      }
+    }
+    if (grades.length) periodImports.push({ period, grades });
+  }
+  return { periodImports, periodSkips };
+}
+
 export function planCourseSync(groups: CampusCourseGroup[], courses: ExistingCourse[], semester: string): SyncAction[] {
   const current = courses.filter((course) => course.semester === semester);
   const plan: SyncAction[] = [];
@@ -61,11 +96,11 @@ export function planCourseSync(groups: CampusCourseGroup[], courses: ExistingCou
     }
     const match = matchCourse(group, current);
     if (match.kind === "ambiguous") { plan.push({ kind: "conflict", groupKeys: [group.key], reason: match.reason }); continue; }
-    if (match.kind === "none") { creates.push(group); plan.push({ kind: "create", groupKeys: [group.key], courseName: "", semester, toAdd: [], skipped: [] }); continue; }
+    if (match.kind === "none") { creates.push(group); plan.push({ kind: "create", groupKeys: [group.key], courseName: "", semester, toAdd: [], skipped: [], periodImports: [], periodSkips: [] }); continue; }
     const entry = merged.get(match.course.id);
     if (entry) { entry.groups.push(group); continue; }
     merged.set(match.course.id, { groups: [group], course: match.course });
-    plan.push({ kind: "add", groupKeys: [], courseId: match.course.id, courseName: match.course.name, toAdd: [], skipped: [], notInCampus: [] });
+    plan.push({ kind: "add", groupKeys: [], courseId: match.course.id, courseName: match.course.name, toAdd: [], skipped: [], notInCampus: [], periodImports: [], periodSkips: [] });
   }
 
   // Fill in the merged "add" actions now that every group of each course is known.
@@ -76,7 +111,9 @@ export function planCourseSync(groups: CampusCourseGroup[], courses: ExistingCou
     const seen = new Set<string>();
     const missing = courseGroups.flatMap((g) => g.students).filter((s) => !known.has(codeOf(s)) && !seen.has(codeOf(s)) && seen.add(codeOf(s)));
     const campusCodes = new Set(courseGroups.flatMap((g) => g.students.map(codeOf)));
-    Object.assign(action, classify(missing, course.students), {
+    const classified = classify(missing, course.students);
+    const finalCodes = new Set([...known, ...classified.toAdd.map(codeOf)]);
+    Object.assign(action, classified, planPeriodImports(courseGroups, finalCodes, course.gradedPeriods ?? []), {
       groupKeys: courseGroups.map((g) => g.key),
       notInCampus: course.students.map(codeOf).filter((code) => !campusCodes.has(code)),
     });
@@ -93,7 +130,8 @@ export function planCourseSync(groups: CampusCourseGroup[], courses: ExistingCou
     let name = taken.has(base.toLowerCase()) || (counts.get(base.toLowerCase()) ?? 0) > 1 ? `${base} - ${group.group}` : base;
     for (let n = 2; taken.has(name.toLowerCase()); n++) name = `${base} - ${group.group} (${n})`;
     taken.add(name.toLowerCase());
-    Object.assign(createActions[index], { courseName: name }, classify(group.students, []));
+    const classified = classify(group.students, []);
+    Object.assign(createActions[index], { courseName: name }, classified, planPeriodImports([group], new Set(classified.toAdd.map(codeOf)), []));
   });
   return plan;
 }

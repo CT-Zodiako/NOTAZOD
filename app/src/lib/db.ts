@@ -607,10 +607,39 @@ export async function loadCampusRows() {
 // Courses with their students for "Sincronizar cursos" (SELECTs only).
 export async function loadSyncCourses(): Promise<ExistingCourse[]> {
   const courses = await listCourses();
-  return Promise.all(courses.map(async (course) => ({ id: course.id, name: course.name, semester: course.semester, students: await listStudents(course.id) })));
+  const db = await getDatabase();
+  return Promise.all(courses.map(async (course) => {
+    const graded = await db.select<{ number: number }[]>("SELECT DISTINCT p.number FROM grades g JOIN grade_items i ON i.id = g.item_id JOIN periods p ON p.id = i.period_id WHERE p.course_id = $1", [course.id]);
+    return { id: course.id, name: course.name, semester: course.semester, students: await listStudents(course.id), gradedPeriods: graded.map((row) => row.number) };
+  }));
 }
 
-export type SyncResult = { courseName: string; created: boolean; added: number; failed: { code: string; reason: string }[] };
+export type SyncResult = { courseName: string; created: boolean; added: number; failed: { code: string; reason: string }[]; imported: { period: number; grades: number }[]; importSkipped: { period: number; reason: string }[] };
+
+// S4: stores a past Campus period as one "Nota del Campus" activity at 100% and closes the period.
+// Re-checks that the period has no grades; its empty default activities are removed so they do not lower the average.
+async function importCampusPeriod(courseId: string, periodNumber: number, grades: { code: string; value: number }[]) {
+  const db = await getDatabase();
+  const period = (await listPeriods(courseId)).find((p) => p.number === periodNumber);
+  if (!period) throw new Error(`Period ${periodNumber} not found`);
+  const existing = await db.select<{ n: number }[]>("SELECT COUNT(*) AS n FROM grades g JOIN grade_items i ON i.id = g.item_id WHERE i.period_id = $1", [period.id]);
+  if (existing[0]?.n) throw new Error(`NOTAZOD ya tiene notas en el corte ${periodNumber}`);
+  const students = await listStudents(courseId);
+  await setPeriodClosed(period.id, false);
+  await db.execute("DELETE FROM grade_history WHERE item_id IN (SELECT id FROM grade_items WHERE period_id = $1)", [period.id]);
+  await db.execute("DELETE FROM grade_items WHERE period_id = $1", [period.id]);
+  await updatePeriod({ ...period, closed: 0, activityPercent: 100, examPercent: 0 });
+  const item = await createGradeItem(courseId, period.id, "Nota del Campus");
+  let saved = 0;
+  for (const grade of grades) {
+    const student = students.find((s) => String(s.code).trim() === grade.code);
+    if (!student) continue;
+    await saveGrade({ studentId: student.id, itemId: item.id, value: grade.value, pending: 0 });
+    saved++;
+  }
+  await setPeriodClosed(period.id, true);
+  return saved;
+}
 
 // Applies a confirmed sync plan: creates courses and adds students; never deletes or edits.
 // An internal backup is taken first. A failing student is reported and the rest continue.
@@ -620,12 +649,16 @@ export async function applyCourseSync(plan: SyncAction[]): Promise<SyncResult[]>
   const results: SyncResult[] = [];
   for (const action of plan) {
     if (action.kind === "conflict") continue;
-    if (!action.toAdd.length && action.kind === "add") continue;
+    if (action.kind === "add" && !action.toAdd.length && !action.periodImports.length) continue;
     const courseId = action.kind === "create" ? (await createCourse(action.courseName, action.semester)).id : action.courseId;
-    const result: SyncResult = { courseName: action.courseName, created: action.kind === "create", added: 0, failed: [] };
+    const result: SyncResult = { courseName: action.courseName, created: action.kind === "create", added: 0, failed: [], imported: [], importSkipped: [...action.periodSkips] };
     for (const student of action.toAdd) {
       try { await createStudent({ ...student, courseId }); result.added++; }
       catch (error) { result.failed.push({ code: student.code, reason: error instanceof Error ? error.message : String(error) }); }
+    }
+    for (const periodImport of action.periodImports) {
+      try { result.imported.push({ period: periodImport.period, grades: await importCampusPeriod(courseId, periodImport.period, periodImport.grades) }); }
+      catch (error) { result.importSkipped.push({ period: periodImport.period, reason: error instanceof Error ? error.message : String(error) }); }
     }
     results.push(result);
   }

@@ -116,3 +116,39 @@ test("S2: new course names never clash with an existing or another new course", 
   const plan = planCourseSync([group("A", ["1"], { module: "POO", group: "GRUPO A" }), group("B", ["2"], { module: "FUND", group: "GRUPO B" }), group("C", ["3"], { module: "FUND", group: "GRUPO C" })], courses, "2026-2");
   assert.deepEqual(plan.map((p) => p.courseName), ["POO - GRUPO A", "FUND - GRUPO B", "FUND - GRUPO C"]);
 });
+
+const withPast = (key, codes, values, extra = {}) => ({ ...group(key, codes), openColumn: 2, pastGrades: [{ period: 1, values }], ...extra });
+
+test("S4: a new course imports the grades of the periods before the open one", () => {
+  const plan = planCourseSync([withPast("G1", ["1", "2"], { "1": "4,9", "2": "0,0" })], [], "2026-2");
+  assert.deepEqual(plan[0].periodImports, [{ period: 1, grades: [{ code: "1", value: 4.9 }, { code: "2", value: 0 }] }]);
+  assert.deepEqual(plan[0].periodSkips, []);
+});
+
+test("S4: a period that already has grades in NOTAZOD is never imported", () => {
+  const courses = [{ id: "poo", name: "POO", semester: "2026-2", gradedPeriods: [1], students: [existingStudent("1"), existingStudent("2")] }];
+  const plan = planCourseSync([withPast("G1", ["1", "2"], { "1": "4,9", "2": "5,0" })], courses, "2026-2");
+  assert.deepEqual(plan[0].periodImports, []);
+  assert.equal(plan[0].periodSkips[0].period, 1);
+  assert.match(plan[0].periodSkips[0].reason, /ya tiene notas/);
+});
+
+test("S4: an existing course without grades in the period imports for its students and the new ones, merging split groups", () => {
+  const courses = [{ id: "fund", name: "Fundamentos", semester: "2026-2", gradedPeriods: [], students: ["1", "2", "3", "4", "9"].map((c) => existingStudent(c)) }];
+  const plan = planCourseSync([withPast("A", ["1", "2"], { "1": "3,5", "2": "4,0" }), withPast("B", ["3", "4", "5"], { "3": "2,8", "4": "3,0", "5": "4,1" })], courses, "2026-2");
+  assert.equal(plan.length, 1);
+  assert.deepEqual(plan[0].periodImports, [{ period: 1, grades: [{ code: "1", value: 3.5 }, { code: "2", value: 4 }, { code: "3", value: 2.8 }, { code: "4", value: 3 }, { code: "5", value: 4.1 }] }]);
+});
+
+test("S4: skipped students and unreadable values are not imported", () => {
+  const campus = withPast("G1", ["1", "2", "3"], { "1": "4,0", "2": "abc", "3": "3,0" });
+  campus.students[2].personalEmail = "";
+  const plan = planCourseSync([campus], [], "2026-2");
+  assert.deepEqual(plan[0].periodImports[0].grades, [{ code: "1", value: 4 }]);
+});
+
+test("S4: without an identified open period nothing is imported and it is reported", () => {
+  const plan = planCourseSync([withPast("G1", ["1"], { "1": "4,0" }, { openColumn: null })], [], "2026-2");
+  assert.deepEqual(plan[0].periodImports, []);
+  assert.match(plan[0].periodSkips[0].reason, /corte abierto/);
+});

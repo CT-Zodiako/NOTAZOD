@@ -250,7 +250,21 @@ export async function readCampusCourses(onStatus: (message: string) => void): Pr
   onStatus("Abriendo el Campus...");
   await ensureLoggedIn(onStatus);
   await openList();
-  const totals = new Map((await evalInCampus<ListedGroup[]>(LIST_GROUPS)).map((g) => [`${g.group} | ${g.module}`, g.total]));
+  const graded = await evalInCampus<ListedGroup[]>(LIST_GROUPS);
+  const totals = new Map(graded.map((g) => [`${g.group} | ${g.module}`, g.total]));
+
+  // S4: the grading form tells which period is open and holds the values of the periods before it.
+  const periodsByGroup = new Map<string, { openColumn: number | null; pastGrades: { period: number; values: Record<string, string> }[] }>();
+  for (const [position, group] of graded.entries()) {
+    onStatus(`Leyendo notas del grupo ${position + 1} de ${graded.length}...`);
+    await openGroup(groupKey(group));
+    const form = await evalInCampus<Form>(READ_FORM);
+    const pastGrades = form.openColumn ? Array.from({ length: form.openColumn - 1 }, (_, i) => ({
+      period: i + 1,
+      values: Object.fromEntries(form.rows.filter((row) => row.inputs[i]).map((row) => [row.code, row.inputs[i]!.value])),
+    })) : [];
+    periodsByGroup.set(`${group.group} | ${group.module}`, { openColumn: form.openColumn, pastGrades });
+  }
 
   const openInfo = () => navigate(`location.href = ${JSON.stringify(INFO_URL)}`, `return location.href.startsWith(${JSON.stringify(INFO_URL)});`, "the Información estudiantes list");
   await openInfo();
@@ -279,6 +293,8 @@ export async function readCampusCourses(onStatus: (message: string) => void): Pr
       module: group.module,
       students,
       expectedCount: totals.get(`${group.group} | ${group.module}`) ?? null,
+      openColumn: periodsByGroup.get(`${group.group} | ${group.module}`)?.openColumn ?? null,
+      pastGrades: periodsByGroup.get(`${group.group} | ${group.module}`)?.pastGrades ?? [],
     });
   }
   return result;
