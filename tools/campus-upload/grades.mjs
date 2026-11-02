@@ -24,7 +24,7 @@ export function verifyGroup(group, courses) {
   const touched = courses.filter((course) => group.codes.some((code) => course.codes.has(code)));
   if (!touched.length) return { status: "unmatched" };
   const complete = touched.filter((candidate) => group.codes.every((code) => candidate.codes.has(code)));
-  if (complete.length > 1) return { status: "failed", courseId: null, candidates: complete.map((c) => c.name), missingCodes: [], notInCampus: [], reason: `student codes match more than one NOTAZOD course: ${complete.map((c) => c.name).join(", ")}` };
+  if (complete.length > 1) return { status: "failed", courseId: null, candidateIds: complete.map((c) => c.id), candidates: complete.map((c) => c.name), missingCodes: [], notInCampus: [], reason: `student codes match more than one NOTAZOD course: ${complete.map((c) => c.name).join(", ")}` };
   const course = complete[0]
     ?? touched.reduce((best, candidate) => countIn(group.codes, candidate) > countIn(group.codes, best) ? candidate : best);
   const missingCodes = group.codes.filter((code) => !course.codes.has(code));
@@ -36,6 +36,13 @@ export function verifyGroup(group, courses) {
 
 function countIn(codes, course) {
   return codes.filter((code) => course.codes.has(code)).length;
+}
+
+// Keeps the groups of one NOTAZOD course, plus ambiguous groups that could belong to it.
+// Without a course, every group is in scope.
+export function scopeToCourse(results, courseId) {
+  if (!courseId) return results;
+  return results.filter((result) => result.courseId === courseId || result.candidateIds?.includes(courseId));
 }
 
 export function planUpload(results) {

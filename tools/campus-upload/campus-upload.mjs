@@ -1,6 +1,6 @@
 // ego-browser script: run through run.sh, which prepends `const CONFIG = {...};`.
-// CONFIG: { dbPath, libUrl, save, reportPath }
-const { loadNotazod, formatGrade, verifyGroup, planUpload } = await import(CONFIG.libUrl);
+// CONFIG: { dbPath, libUrl, save, reportPath, courseId? }
+const { loadNotazod, formatGrade, verifyGroup, planUpload, scopeToCourse } = await import(CONFIG.libUrl);
 const { writeFile } = await import("node:fs/promises");
 
 const BASE = "https://campus2.unimayor.edu.co/CampusRegistroNotas/";
@@ -97,11 +97,15 @@ for (const group of await listGroups()) {
   report.groups.push(entry);
 }
 
-const plan = planUpload(report.groups);
+// S5: a course-scoped run only checks and saves the groups of that course.
+const inScope = new Set(scopeToCourse(report.groups, CONFIG.courseId));
+for (const g of report.groups) g.inScope = inScope.has(g);
+const plan = planUpload([...inScope]);
+report.courseId = CONFIG.courseId ?? null;
 report.canSave = plan.canSave;
 
 function printReport() {
-  for (const g of report.groups) {
+  for (const g of report.groups.filter((entry) => entry.inScope)) {
     const head = `\n[${g.status.toUpperCase()}] ${g.key}`;
     if (g.status === "unmatched") { console.log(`${head}\n  No student code from this group exists in NOTAZOD; skipped.`); continue; }
     console.log(`${head}\n  NOTAZOD course: ${g.course ?? g.courseId ?? "-"} | Campus open column: ${g.openColumn ? `Nota ${g.openColumn}` : "none"}${g.notazodPeriodClosed === false ? " | WARNING: NOTAZOD period still open" : ""}`);
@@ -123,7 +127,7 @@ if (!CONFIG.save || !plan.canSave) {
   // S4: everything verified. Fill each verified group, save, then read it back.
   // The report is written even when a later group stops, so earlier saves stay on record.
   try {
-  for (const g of report.groups.filter((entry) => entry.status === "verified")) {
+  for (const g of [...inScope].filter((entry) => entry.status === "verified")) {
     await openGroup(g.group);
     const form = await readForm();
     const sameStudents = form.openColumn === g.openColumn && form.rows.length === g.rows.length && form.rows.every((row, i) => row.code === g.rows[i].code);
@@ -148,7 +152,7 @@ if (!CONFIG.save || !plan.canSave) {
     throw error;
   }
   printReport();
-  for (const g of report.groups.filter((entry) => entry.status === "verified")) console.log(`\n${g.saved ? "SAVED AND CONFIRMED" : "SAVE NOT CONFIRMED"}: ${g.key}${g.saveMessage ? ` (${g.saveMessage})` : ""}`);
+  for (const g of [...inScope].filter((entry) => entry.status === "verified")) console.log(`\n${g.saved ? "SAVED AND CONFIRMED" : "SAVE NOT CONFIRMED"}: ${g.key}${g.saveMessage ? ` (${g.saveMessage})` : ""}`);
   await writeFile(CONFIG.reportPath, JSON.stringify(report, null, 2));
   console.log(`Report: ${CONFIG.reportPath}`);
 }

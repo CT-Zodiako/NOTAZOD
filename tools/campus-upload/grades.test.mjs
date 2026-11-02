@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { formatGrade, loadNotazod, periodGrade, planUpload, verifyGroup } from "./grades.mjs";
+import { formatGrade, loadNotazod, periodGrade, planUpload, scopeToCourse, verifyGroup } from "./grades.mjs";
 
 const period = { activityPercent: 40, examPercent: 60 };
 const items = [
@@ -124,4 +124,47 @@ test("S3: loadNotazod reads courses and period grades through the public schema"
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("S5: a course-scoped upload keeps only the groups of that course", () => {
+  const results = [
+    { key: "fund-a", status: "verified", courseId: "fund" },
+    { key: "poo", status: "verified", courseId: "poo" },
+    { key: "fund-b", status: "verified", courseId: "fund" },
+    { key: "other", status: "unmatched" },
+  ];
+  assert.deepEqual(scopeToCourse(results, "fund").map((r) => r.key), ["fund-a", "fund-b"]);
+  assert.equal(planUpload(scopeToCourse(results, "fund")).canSave, true);
+});
+
+test("S5: a failed group of another course does not block the selected course", () => {
+  const results = [
+    { key: "fund-a", status: "verified", courseId: "fund" },
+    { key: "poo", status: "failed", courseId: "poo" },
+  ];
+  assert.equal(planUpload(scopeToCourse(results, "fund")).canSave, true);
+});
+
+test("S5: a failed group of the selected course blocks the save", () => {
+  const results = [
+    { key: "fund-a", status: "verified", courseId: "fund" },
+    { key: "fund-b", status: "failed", courseId: "fund" },
+  ];
+  assert.equal(planUpload(scopeToCourse(results, "fund")).canSave, false);
+});
+
+test("S5: an ambiguous group that could belong to the selected course blocks the save", () => {
+  const overlapping = [
+    { id: "fund", name: "Fundamentos", codes: new Set(["1", "2"]) },
+    { id: "lab", name: "Laboratorio", codes: new Set(["1", "2"]) },
+  ];
+  const ambiguous = { key: "g", ...verifyGroup({ name: "g", codes: ["1", "2"], openColumn: 2 }, overlapping) };
+  const results = [{ key: "fund-a", status: "verified", courseId: "fund" }, ambiguous];
+  assert.equal(planUpload(scopeToCourse(results, "fund")).canSave, false);
+  assert.equal(planUpload(scopeToCourse(results, "poo")).canSave, false);
+});
+
+test("S5: without a course the scope is every group", () => {
+  const results = [{ key: "a", status: "verified", courseId: "fund" }, { key: "b", status: "failed", courseId: "poo" }];
+  assert.equal(scopeToCourse(results, undefined).length, 2);
 });
