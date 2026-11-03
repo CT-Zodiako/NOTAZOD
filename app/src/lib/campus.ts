@@ -225,11 +225,12 @@ const LIST_INFO_GROUPS = `${NORMALIZE}
   if (!table) return null;
   const header = [...table.rows[0].cells].map((cell) => norm(cell.textContent));
   const at = (name) => header.findIndex((h) => h.startsWith(name));
-  const [program, group, module, consult] = [at("programa"), at("grupo"), at("comp"), at("consultar")];
+  const [program, group, module, consult, schedule, room] = [at("programa"), at("grupo"), at("comp"), at("consultar"), at("horario"), at("salon")];
+  if ([program, group, module, consult, schedule, room].some((i) => i < 0)) throw new Error("Missing Campus group table columns: " + header.join(", "));
   return [...table.rows].slice(1).map((row, index) => {
     const text = (i) => (i >= 0 && row.cells[i] ? row.cells[i].textContent.replace(/\\s+/g, " ").trim() : "");
     const control = row.cells[consult] && row.cells[consult].querySelector("a, input[type=image], input[type=submit], button");
-    return { index, program: text(program), group: text(group), module: text(module), hasControl: !!control };
+    return { index, program: text(program), group: text(group), module: text(module), schedule: text(schedule), room: text(room), hasControl: !!control };
   });`;
 
 const READ_INFO_STUDENTS = `${NORMALIZE}
@@ -242,7 +243,7 @@ const READ_INFO_STUDENTS = `${NORMALIZE}
   return [...table.rows].slice(1).filter((row) => row.cells.length >= header.length).map((row) =>
     Object.fromEntries(Object.entries(columns).map(([key, i]) => [key, row.cells[i].textContent.replace(/\\s+/g, " ").trim()])));`;
 
-type InfoGroup = { index: number; program: string; group: string; module: string; hasControl: boolean };
+type InfoGroup = { index: number; program: string; group: string; module: string; schedule: string; room: string; hasControl: boolean };
 
 // Reads every Campus group with its students (name, code, document and both emails).
 // expectedCount comes from the grading list when the same group appears there.
@@ -291,6 +292,8 @@ export async function readCampusCourses(onStatus: (message: string) => void): Pr
       program: group.program,
       group: group.group,
       module: group.module,
+      schedule: group.schedule,
+      room: group.room,
       students,
       expectedCount: totals.get(`${group.group} | ${group.module}`) ?? null,
       openColumn: periodsByGroup.get(`${group.group} | ${group.module}`)?.openColumn ?? null,

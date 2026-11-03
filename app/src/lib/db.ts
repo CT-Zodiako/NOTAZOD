@@ -1,12 +1,13 @@
 import Database from "@tauri-apps/plugin-sql";
 import { invoke } from "@tauri-apps/api/core";
-import type { ExistingCourse, SyncAction } from "./campusSync";
+import type { CampusGroupMetadata, ExistingCourse, SyncAction } from "./campusSync";
 
 export type Course = {
   id: string;
   name: string;
   semester: string;
   students: number;
+  campusGroups?: CampusGroupMetadata[];
 };
 
 export type Student = {
@@ -89,6 +90,17 @@ export async function initDatabase() {
       semester TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(name, semester)
+    );
+  `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS campus_course_groups (
+      course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      campus_key TEXT NOT NULL,
+      program TEXT NOT NULL,
+      group_name TEXT NOT NULL,
+      schedule TEXT NOT NULL,
+      room TEXT NOT NULL,
+      PRIMARY KEY (course_id, campus_key)
     );
   `);
   await db.execute(`
@@ -180,13 +192,15 @@ export async function initDatabase() {
 
 export async function listCourses(): Promise<Course[]> {
   const db = await getDatabase();
-  return db.select<Course[]>(`
+  const courses = await db.select<Course[]>(`
     SELECT c.id, c.name, c.semester, COUNT(s.id) AS students
     FROM courses c
     LEFT JOIN students s ON s.course_id = c.id
     GROUP BY c.id
     ORDER BY c.name COLLATE NOCASE
   `);
+  const groups = await db.select<(CampusGroupMetadata & { courseId: string })[]>(`SELECT course_id AS courseId, campus_key AS key, program, group_name AS "group", schedule, room FROM campus_course_groups ORDER BY group_name`);
+  return courses.map((course) => ({ ...course, campusGroups: groups.filter((group) => group.courseId === course.id) }));
 }
 
 export async function createCourse(name: string, semester: string): Promise<Course> {
@@ -210,21 +224,44 @@ export async function exportBackup(destinationPath: string) {
   await db.execute("VACUUM INTO $1", [destinationPath]);
 }
 
+// Every foreign key a course deletion must cascade through, as "table.column -> parent".
+const COURSE_CASCADE_KEYS = [
+  "campus_course_groups.course_id -> courses",
+  "students.course_id -> courses",
+  "periods.course_id -> courses",
+  "grade_items.course_id -> courses",
+  "grade_items.period_id -> periods",
+  "grades.student_id -> students",
+  "grades.item_id -> grade_items",
+  "groups.period_id -> periods",
+  "group_members.period_id -> periods",
+  "group_members.group_id -> groups",
+  "group_members.student_id -> students",
+  "grade_history.student_id -> students",
+  "grade_history.item_id -> grade_items",
+];
+
+// The plugin runs each execute() on any pooled connection, so BEGIN/COMMIT across calls is not a
+// transaction. A single DELETE is atomic on its own, but only removes the child rows if every key
+// cascades and foreign keys are enforced (sqlx turns them on for each pooled connection).
+async function assertCourseCascades(db: Database) {
+  const rows = await db.select<{ key: string; onDelete: string; enforced: number }[]>(`
+    SELECT m.name || '.' || f."from" || ' -> ' || f."table" AS key, f.on_delete AS onDelete,
+      (SELECT foreign_keys FROM pragma_foreign_keys) AS enforced
+    FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) f
+    WHERE m.type = 'table'
+  `);
+  if (!rows.length || !rows[0].enforced) throw new Error("Foreign keys are not enforced");
+  const missing = COURSE_CASCADE_KEYS.filter((key) => !rows.some((row) => row.key === key && row.onDelete === "CASCADE"));
+  if (missing.length) throw new Error(`Database schema does not cascade course deletion: ${missing.join(", ")}`);
+}
+
 export async function deleteCourse(courseId: string) {
   const db = await getDatabase();
+  await assertCourseCascades(db);
   await createInternalBackup(db);
-  await db.execute("BEGIN");
-  try {
-    await db.execute("DELETE FROM grades WHERE item_id IN (SELECT id FROM grade_items WHERE course_id = $1)", [courseId]);
-    await db.execute("DELETE FROM grade_items WHERE course_id = $1", [courseId]);
-    await db.execute("DELETE FROM students WHERE course_id = $1", [courseId]);
-    await db.execute("DELETE FROM periods WHERE course_id = $1", [courseId]);
-    await db.execute("DELETE FROM courses WHERE id = $1", [courseId]);
-    await db.execute("COMMIT");
-  } catch (error) {
-    await db.execute("ROLLBACK");
-    throw error;
-  }
+  const result = await db.execute("DELETE FROM courses WHERE id = $1", [courseId]);
+  if (result.rowsAffected !== 1) throw new Error("Course not found");
 }
 
 export async function listStudents(courseId: string): Promise<Student[]> {
@@ -652,8 +689,13 @@ export async function applyCourseSync(plan: SyncAction[]): Promise<SyncResult[]>
   const results: SyncResult[] = [];
   for (const action of plan) {
     if (action.kind === "conflict") continue;
-    if (action.kind === "add" && !action.toAdd.length && !action.periodImports.length) continue;
     const courseId = action.kind === "create" ? (await createCourse(action.courseName, action.semester)).id : action.courseId;
+    for (const group of action.campusGroups) {
+      await db.execute(`INSERT INTO campus_course_groups (course_id, campus_key, program, group_name, schedule, room)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT(course_id, campus_key) DO UPDATE SET program = excluded.program, group_name = excluded.group_name, schedule = excluded.schedule, room = excluded.room`,
+        [courseId, group.key, group.program, group.group, group.schedule, group.room]);
+    }
     const result: SyncResult = { courseName: action.courseName, created: action.kind === "create", added: 0, failed: [], imported: [], importSkipped: [...action.periodSkips] };
     for (const student of action.toAdd) {
       try { await createStudent({ ...student, courseId }); result.added++; }

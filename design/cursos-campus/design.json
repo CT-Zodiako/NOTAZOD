@@ -1,0 +1,27 @@
+{
+  "title": "Cursos y grupos del Campus",
+  "brief": "Alternativas para mostrar programa, horario y salón por grupo en Tus cursos.",
+  "artboards": [
+    {
+      "file": "01-tarjetas-visibles.html",
+      "title": "Tarjetas con datos visibles",
+      "tradeoff": "Toda la información se ve de inmediato; las tarjetas ocupan más alto.",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "02-tarjetas-desplegables.html",
+      "title": "Tarjetas desplegables",
+      "tradeoff": "Mantiene la pantalla compacta; los datos pueden requerir un clic.",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "03-lista-comparativa.html",
+      "title": "Lista comparativa",
+      "tradeoff": "Facilita comparar horarios entre cursos; cambia la cuadrícula por filas.",
+      "width": 1440,
+      "height": 900
+    }
+  ]
+}

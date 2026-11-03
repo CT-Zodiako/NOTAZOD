@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "chosen": "03-lista-comparativa.html",
+  "handoffs": {
+    "03-lista-comparativa.html": {
+      "status": "implemented",
+      "queued": false,
+      "sentAt": "2026-11-03T00:16:00.799Z",
+      "startedAt": null,
+      "implementedAt": "2026-11-03T00:16:48.925Z",
+      "note": "Responsive comparison list implemented; browser preview has no Tauri database, so populated rows need verification in NOTAZOD Test.",
+      "previewUrl": "http://localhost:1420/"
+    }
+  }
+}

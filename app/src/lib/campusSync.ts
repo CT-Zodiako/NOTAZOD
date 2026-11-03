@@ -8,6 +8,8 @@ export type CampusCourseGroup = {
   program: string;
   group: string;
   module: string;
+  schedule?: string;
+  room?: string;
   students: StudentDraft[];
   expectedCount: number | null;
   // Campus grading form: the open period column, and the values of the periods before it.
@@ -19,9 +21,12 @@ export type ExistingCourse = { id: string; name: string; semester: string; stude
 export type PeriodImport = { period: number; grades: { code: string; value: number }[] };
 export type PeriodSkip = { period: number; reason: string };
 export type SkippedStudent = { row: StudentDraft; reason: string };
+export type CampusGroupMetadata = { key: string; program: string; group: string; schedule: string; room: string };
+const metadata = (g: CampusCourseGroup): CampusGroupMetadata => ({ key: g.key, program: g.program, group: g.group, schedule: g.schedule ?? "", room: g.room ?? "" });
+
 export type SyncAction =
-  | { kind: "create"; groupKeys: string[]; courseName: string; semester: string; toAdd: StudentDraft[]; skipped: SkippedStudent[]; periodImports: PeriodImport[]; periodSkips: PeriodSkip[] }
-  | { kind: "add"; groupKeys: string[]; courseId: string; courseName: string; toAdd: StudentDraft[]; skipped: SkippedStudent[]; notInCampus: string[]; periodImports: PeriodImport[]; periodSkips: PeriodSkip[] }
+  | { campusGroups: CampusGroupMetadata[]; kind: "create"; groupKeys: string[]; courseName: string; semester: string; toAdd: StudentDraft[]; skipped: SkippedStudent[]; periodImports: PeriodImport[]; periodSkips: PeriodSkip[] }
+  | { campusGroups: CampusGroupMetadata[]; kind: "add"; groupKeys: string[]; courseId: string; courseName: string; toAdd: StudentDraft[]; skipped: SkippedStudent[]; notInCampus: string[]; periodImports: PeriodImport[]; periodSkips: PeriodSkip[] }
   | { kind: "conflict"; groupKeys: string[]; reason: string };
 
 // Same convention as the existing courses: first half of the year is "-1", second half "-2".
@@ -96,11 +101,11 @@ export function planCourseSync(groups: CampusCourseGroup[], courses: ExistingCou
     }
     const match = matchCourse(group, current);
     if (match.kind === "ambiguous") { plan.push({ kind: "conflict", groupKeys: [group.key], reason: match.reason }); continue; }
-    if (match.kind === "none") { creates.push(group); plan.push({ kind: "create", groupKeys: [group.key], courseName: "", semester, toAdd: [], skipped: [], periodImports: [], periodSkips: [] }); continue; }
+    if (match.kind === "none") { creates.push(group); plan.push({ kind: "create", campusGroups: [metadata(group)], groupKeys: [group.key], courseName: "", semester, toAdd: [], skipped: [], periodImports: [], periodSkips: [] }); continue; }
     const entry = merged.get(match.course.id);
     if (entry) { entry.groups.push(group); continue; }
     merged.set(match.course.id, { groups: [group], course: match.course });
-    plan.push({ kind: "add", groupKeys: [], courseId: match.course.id, courseName: match.course.name, toAdd: [], skipped: [], notInCampus: [], periodImports: [], periodSkips: [] });
+    plan.push({ kind: "add", campusGroups: [], groupKeys: [], courseId: match.course.id, courseName: match.course.name, toAdd: [], skipped: [], notInCampus: [], periodImports: [], periodSkips: [] });
   }
 
   // Fill in the merged "add" actions now that every group of each course is known.
@@ -115,6 +120,7 @@ export function planCourseSync(groups: CampusCourseGroup[], courses: ExistingCou
     const finalCodes = new Set([...known, ...classified.toAdd.map(codeOf)]);
     Object.assign(action, classified, planPeriodImports(courseGroups, finalCodes, course.gradedPeriods ?? []), {
       groupKeys: courseGroups.map((g) => g.key),
+      campusGroups: courseGroups.map(metadata),
       notInCampus: course.students.map(codeOf).filter((code) => !campusCodes.has(code)),
     });
   }
