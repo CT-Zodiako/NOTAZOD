@@ -241,10 +241,16 @@ const COURSE_CASCADE_KEYS = [
   "grade_history.item_id -> grade_items",
 ];
 
+// Every foreign key an activity deletion must cascade through.
+const GRADE_ITEM_CASCADE_KEYS = [
+  "grades.item_id -> grade_items",
+  "grade_history.item_id -> grade_items",
+];
+
 // The plugin runs each execute() on any pooled connection, so BEGIN/COMMIT across calls is not a
 // transaction. A single DELETE is atomic on its own, but only removes the child rows if every key
 // cascades and foreign keys are enforced (sqlx turns them on for each pooled connection).
-async function assertCourseCascades(db: Database) {
+async function assertCascades(db: Database, keys: string[], target: string) {
   const rows = await db.select<{ key: string; onDelete: string; enforced: number }[]>(`
     SELECT m.name || '.' || f."from" || ' -> ' || f."table" AS key, f.on_delete AS onDelete,
       (SELECT foreign_keys FROM pragma_foreign_keys) AS enforced
@@ -252,13 +258,13 @@ async function assertCourseCascades(db: Database) {
     WHERE m.type = 'table'
   `);
   if (!rows.length || !rows[0].enforced) throw new Error("Foreign keys are not enforced");
-  const missing = COURSE_CASCADE_KEYS.filter((key) => !rows.some((row) => row.key === key && row.onDelete === "CASCADE"));
-  if (missing.length) throw new Error(`Database schema does not cascade course deletion: ${missing.join(", ")}`);
+  const missing = keys.filter((key) => !rows.some((row) => row.key === key && row.onDelete === "CASCADE"));
+  if (missing.length) throw new Error(`Database schema does not cascade ${target} deletion: ${missing.join(", ")}`);
 }
 
 export async function deleteCourse(courseId: string) {
   const db = await getDatabase();
-  await assertCourseCascades(db);
+  await assertCascades(db, COURSE_CASCADE_KEYS, "course");
   await createInternalBackup(db);
   const result = await db.execute("DELETE FROM courses WHERE id = $1", [courseId]);
   if (result.rowsAffected !== 1) throw new Error("Course not found");
@@ -325,23 +331,28 @@ export async function renameGradeItem(itemId: string, name: string) {
   await db.execute("UPDATE grade_items SET name = $1 WHERE id = $2", [name, itemId]);
 }
 
-export async function deleteGradeItem(itemId: string) {
-  const db = await getDatabase();
+async function assertGradeItemDeletable(db: Database, itemId: string) {
   const item = await db.select<{ periodId: string | null; isExam: number }[]>("SELECT period_id AS periodId, is_exam AS isExam FROM grade_items WHERE id = $1", [itemId]);
   if (!item[0]) throw new Error("Grade item not found");
   if (item[0].isExam) throw new Error("Exam items cannot be deleted");
   if (item[0].periodId) await assertPeriodOpen(db, item[0].periodId);
+}
+
+// One DELETE that cascades to grades and history, so a failure anywhere rolls back the whole
+// statement. The exam and closed-period guards are repeated in the WHERE clause because the
+// period can be closed between the checks and the delete.
+export async function deleteGradeItem(itemId: string) {
+  const db = await getDatabase();
+  await assertGradeItemDeletable(db, itemId);
+  await assertCascades(db, GRADE_ITEM_CASCADE_KEYS, "activity");
   await createInternalBackup(db);
-  await db.execute("BEGIN");
-  try {
-    await db.execute("DELETE FROM grade_history WHERE item_id = $1", [itemId]);
-    await db.execute("DELETE FROM grades WHERE item_id = $1", [itemId]);
-    await db.execute("DELETE FROM grade_items WHERE id = $1", [itemId]);
-    await db.execute("COMMIT");
-  } catch (error) {
-    await db.execute("ROLLBACK");
-    throw error;
-  }
+  const result = await db.execute(`
+    DELETE FROM grade_items WHERE id = $1 AND is_exam = 0
+      AND NOT EXISTS (SELECT 1 FROM periods p WHERE p.id = grade_items.period_id AND p.closed <> 0)
+  `, [itemId]);
+  if (result.rowsAffected === 1) return;
+  await assertGradeItemDeletable(db, itemId);
+  throw new Error("Grade item was not deleted");
 }
 
 export async function createGradeItem(courseId: string, periodId: string, name: string, isExam = 0): Promise<GradeItem> {

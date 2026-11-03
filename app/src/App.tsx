@@ -9,7 +9,6 @@ import {
   Card,
   Checkbox,
   Container,
-  FileButton,
   Loader,
   Group,
   Menu,
@@ -23,14 +22,13 @@ import {
   Table,
   Text,
   TextInput,
-  Textarea,
   Title,
   useMantineColorScheme,
 } from "@mantine/core";
 import { assignStudentToGroup, copyGroupsFromPeriod, Course, createCourse, createGradeItem, createGroup, createStudent, deleteCourse, deleteGrade, applyCourseSync, deleteGradeItem, deleteGroup, exportBackup, loadSyncCourses, SyncResult, Grade, GradeHistoryEntry, GradeItem, Group as StudentGroup, GroupMembership, initDatabase, listCourses, listGradeHistory, listGradeItems, listGrades, listGroupMemberships, listGroups, listPeriods, listStudents, Period, renameGradeItem, renameGroup, saveGrade, saveGroupGrade, setPeriodClosed, stageRestore, Student, undoLastGrade, updatePeriod } from "./lib/db";
 import { CampusReport, openCampusWindow, readCampusCourses, runCampusUpload } from "./lib/campus";
 import { currentSemester, planCourseSync, SyncAction } from "./lib/campusSync";
-import { classifyStudentRows, hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
+import { hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
 
 const emptyStudent: StudentDraft = {
   fullName: "",
@@ -47,71 +45,6 @@ function parseGrade(value: string) {
   const number = Number(normalized);
   if (number < 0 || number > 5) return { error: "La nota debe estar entre 0,0 y 5,0." } as const;
   return { value: Math.round(number * 10) / 10 } as const;
-}
-
-const normalizeHeader = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
-
-function mapStudentColumns(columns: string[], values: string[]): StudentDraft {
-  const normalized = columns.map(normalizeHeader);
-  const indexOf = (names: string[]) => normalized.findIndex((column) => names.includes(column));
-  const indexes = {
-    fullName: indexOf(["nombre completo", "nombre", "full name"]),
-    code: indexOf(["codigo", "student code"]),
-    documentId: indexOf(["documento", "document id", "cedula"]),
-    institutionalEmail: indexOf(["correo institucional", "correo 1", "institutional email"]),
-    personalEmail: indexOf(["correo personal", "correo 2", "personal email"]),
-  };
-  return Object.fromEntries(Object.entries(indexes).map(([key, index]) => [key, index >= 0 ? values[index]?.trim() ?? "" : ""])) as StudentDraft;
-}
-
-function parseDelimited(text: string): StudentDraft[] {
-  const [header, ...rows] = text.trim().split(/\r?\n/);
-  if (!header) return [];
-  const delimiter = header.includes(";") ? ";" : ",";
-  const columns = header.split(delimiter);
-  return rows.filter(Boolean).map((row) => mapStudentColumns(columns, row.split(delimiter)));
-}
-
-function parseHtmlSpreadsheet(text: string): StudentDraft[] {
-  const document = new DOMParser().parseFromString(text, "text/html");
-  const table = document.querySelector("table");
-  if (!table) return [];
-  const rows = [...table.querySelectorAll("tr")].map((row) => [...row.querySelectorAll("th, td")].map((cell) => cell.textContent?.replace(/\s+/g, " ").trim() ?? ""));
-  const [columns, ...data] = rows;
-  if (!columns) return [];
-  return data.filter((row) => row.length).map((row) => mapStudentColumns(columns, row));
-}
-
-function parseStudentFile(text: string): StudentDraft[] {
-  return /<table[\s>]/i.test(text) ? parseHtmlSpreadsheet(text) : parseDelimited(text);
-}
-
-type GradeImportRow = { code: string; values: Array<number | null>; invalid: string[] };
-type GradeImportData = { headers: string[]; rows: GradeImportRow[]; gradeHeaders: string[] };
-
-function parseGradeFile(text: string): GradeImportData | null {
-  const rows = /<table[\s>]/i.test(text)
-    ? (() => { const document = new DOMParser().parseFromString(text, "text/html"); return [...document.querySelectorAll("tr")].map((row) => [...row.querySelectorAll("th, td")].map((cell) => cell.textContent?.replace(/\s+/g, " ").trim() ?? "")); })()
-    : text.trim().split(/\r?\n/).filter(Boolean).map((row) => row.split(row.includes(";") ? ";" : ",").map((value) => value.trim().replace(/^"|"$/g, "")));
-  const [headers, ...data] = rows;
-  if (!headers) return null;
-  const normalized = headers.map(normalizeHeader);
-  const codeIndex = normalized.findIndex((header) => ["codigo", "código", "student code"].includes(header));
-  if (codeIndex < 0) return null;
-  const gradeIndexes = headers.map((header, index) => ({ header, index })).filter(({ index }) => index !== codeIndex && index > codeIndex && data.some((row) => row[index]?.trim() && /^\d+(?:[,.]\d)?$/.test(row[index].trim())));
-  if (!gradeIndexes.length) return null;
-  const parsedRows = data.map((row) => {
-    const invalid: string[] = [];
-    const values = gradeIndexes.map(({ header, index }) => {
-      const value = row[index]?.trim() ?? "";
-      if (!value) return null;
-      const normalizedValue = value.replace(",", ".");
-      if (!/^\d+(?:\.\d)?$/.test(normalizedValue) || Number(normalizedValue) > 5) { invalid.push(`${header}: ${value}`); return null; }
-      return Math.round(Number(normalizedValue) * 10) / 10;
-    });
-    return { code: row[codeIndex]?.trim() ?? "", values, invalid };
-  }).filter((row) => row.code);
-  return { headers, rows: parsedRows, gradeHeaders: gradeIndexes.map(({ header }) => header) };
 }
 
 function App() {
@@ -137,6 +70,7 @@ function App() {
   const [renameItem, setRenameItem] = useState<GradeItem | null>(null);
   const [renameName, setRenameName] = useState("");
   const [deleteActivityConfirm, setDeleteActivityConfirm] = useState(false);
+  const [deleteActivityError, setDeleteActivityError] = useState("");
   const [campusModal, setCampusModal] = useState(false);
   const [campusState, setCampusState] = useState<"idle" | "checking" | "preview" | "saving" | "done" | "error">("idle");
   const [campusReport, setCampusReport] = useState<CampusReport | null>(null);
@@ -148,29 +82,16 @@ function App() {
   const [syncResults, setSyncResults] = useState<SyncResult[]>([]);
   const [syncError, setSyncError] = useState("");
   const [activityName, setActivityName] = useState("");
-  const [importModal, setImportModal] = useState(false);
-  const [guidedModal, setGuidedModal] = useState(false);
-  const [guidedStage, setGuidedStage] = useState<"students" | "activity" | "exam" | "preview">("students");
-  const [guidedFieldIndex, setGuidedFieldIndex] = useState(0);
-  const [guidedColumns, setGuidedColumns] = useState<string[][]>([]);
-  const [guidedPaste, setGuidedPaste] = useState("");
-  const [guidedActivityName, setGuidedActivityName] = useState("");
-  const [guidedGrades, setGuidedGrades] = useState<{ name: string; values: Array<number | null>; exam: boolean }[]>([]);
-  const [guidedError, setGuidedError] = useState("");
   const [exportModal, setExportModal] = useState(false);
   const [exportError, setExportError] = useState("");
   const [templateModal, setTemplateModal] = useState(false);
   const [templateColumns, setTemplateColumns] = useState<string[]>(["code", "name", "email"]);
   const [exportColumns, setExportColumns] = useState<string[]>(["code", "periodGrade"]);
-  const [gradeImportModal, setGradeImportModal] = useState(false);
-  const [gradeImportData, setGradeImportData] = useState<GradeImportData | null>(null);
-  const [gradeImportLastIsExam, setGradeImportLastIsExam] = useState(true);
   const [name, setName] = useState("");
   const [studentSearch, setStudentSearch] = useState("");
   const [semester, setSemester] = useState("2026-2");
   const [student, setStudent] = useState<StudentDraft>(emptyStudent);
   const [studentErrors, setStudentErrors] = useState<StudentValidation>({});
-  const [importPreview, setImportPreview] = useState<ReturnType<typeof classifyStudentRows> | null>(null);
   const [gradeModal, setGradeModal] = useState(false);
   const [gradeItem, setGradeItem] = useState<GradeItem | null>(null);
   const [gradeIndex, setGradeIndex] = useState(0);
@@ -216,7 +137,6 @@ function App() {
   const [groupGradeItemId, setGroupGradeItemId] = useState<string | null>(null);
   const [groupGradeValue, setGroupGradeValue] = useState("");
   const [groupGradeError, setGroupGradeError] = useState("");
-  const guidedFields = ["Nombre completo", "Código", "Documento", "Correo institucional", "Correo personal"];
 
   useEffect(() => {
     initDatabase()
@@ -667,104 +587,15 @@ function App() {
     }
   }
 
-  function openGuidedImport() {
-    setGuidedStage("students"); setGuidedFieldIndex(0); setGuidedColumns([]); setGuidedPaste(""); setGuidedGrades([]); setGuidedError(""); setGuidedModal(true);
-  }
-
-  function pastedLines(value: string) {
-    return value.replace(/\r/g, "").split("\n").map((line) => line.trim()).filter((line, index, all) => line || index < all.length - 1);
-  }
-
-  function acceptGuidedStudentColumn() {
-    const lines = pastedLines(guidedPaste);
-    if (!lines.length) { setGuidedError("Pegá una columna antes de continuar."); return; }
-    if (guidedColumns.length && lines.length !== guidedColumns[0].length) { setGuidedError(`Se esperaban ${guidedColumns[0].length} filas y recibimos ${lines.length}.`); return; }
-    const nextColumns = [...guidedColumns, lines];
-    setGuidedColumns(nextColumns); setGuidedPaste(""); setGuidedError("");
-    if (nextColumns.length === guidedFields.length) setGuidedStage("activity"); else setGuidedFieldIndex(guidedFieldIndex + 1);
-  }
-
-  function parseGuidedGrades() {
-    const lines = pastedLines(guidedPaste);
-    const expected = guidedColumns[0]?.length ?? 0;
-    if (lines.length !== expected) { setGuidedError(`Se esperaban ${expected} notas y recibimos ${lines.length}.`); return null; }
-    const values: Array<number | null> = [];
-    for (const value of lines) {
-      if (!value) { values.push(null); continue; }
-      const normalized = value.replace(",", ".");
-      if (!/^\d+(?:\.\d)?$/.test(normalized) || Number(normalized) > 5) { setGuidedError(`Nota inválida: ${value}`); return null; }
-      values.push(Math.round(Number(normalized) * 10) / 10);
-    }
-    return values;
-  }
-
-  function acceptGuidedActivity(hasExamNext: boolean) {
-    if (!guidedActivityName.trim()) { setGuidedError("Escribí el nombre de la actividad."); return; }
-    const values = parseGuidedGrades(); if (!values) return;
-    setGuidedGrades((current) => [...current, { name: guidedActivityName.trim(), values, exam: false }]);
-    setGuidedActivityName(""); setGuidedPaste(""); setGuidedError("");
-    if (hasExamNext) setGuidedStage("exam");
-  }
-
-  function skipGuidedExam() { setGuidedStage("preview"); setGuidedError(""); }
-
-  function saveGuidedWithoutExam() {
-    if (guidedActivityName.trim() || guidedPaste.trim()) { setGuidedError("Terminá o limpiá la actividad en curso antes de guardar."); return; }
-    setGuidedStage("preview"); setGuidedError("");
-  }
-
-  function goToGuidedExam() {
-    if (guidedActivityName.trim() || guidedPaste.trim()) { acceptGuidedActivity(true); return; }
-    setGuidedStage("exam"); setGuidedError("");
-  }
-
-  function removeGuidedActivity(index: number) {
-    setGuidedGrades((current) => current.filter((_, itemIndex) => itemIndex !== index));
-  }
-
-  function acceptGuidedExam() {
-    const values = parseGuidedGrades(); if (!values) return;
-    setGuidedGrades((current) => [...current.filter((item) => !item.exam), { name: "Parcial", values, exam: true }]); setGuidedPaste(""); setGuidedError(""); setGuidedStage("preview");
-  }
-
-  async function persistGuidedImport() {
-    if (!selectedCourse || !activePeriod || activeState === "locked") return;
-    const column = (index: number) => guidedColumns[index] ?? [];
-    const importedStudents: Student[] = [];
-    for (let index = 0; index < column(0).length; index += 1) {
-      const existing = students.find((student) => student.code === column(1)[index]);
-      if (existing) { importedStudents.push(existing); continue; }
-      importedStudents.push(await createStudent({ courseId: selectedCourse.id, fullName: column(0)[index], code: column(1)[index], documentId: column(2)[index], institutionalEmail: column(3)[index], personalEmail: column(4)[index] }));
-    }
-    const currentPeriodItems = itemsByPeriod[activePeriod.id] ?? gradeItems;
-    const currentActivities = currentPeriodItems.filter((item) => !item.isExam);
-    const createdItems: GradeItem[] = [];
-    for (let index = 0; index < guidedGrades.filter((grade) => !grade.exam).length; index += 1) {
-      const grade = guidedGrades.filter((item) => !item.exam)[index];
-      const existing = currentActivities[index];
-      if (existing) {
-        if (index === 0 && existing.name === "Actividad 1" && existing.name !== grade.name) { await renameGradeItem(existing.id, grade.name); createdItems.push({ ...existing, name: grade.name }); }
-        else createdItems.push(existing);
-      } else createdItems.push(await createGradeItem(selectedCourse.id, activePeriod.id, grade.name));
-    }
-    const examGrade = guidedGrades.find((grade) => grade.exam);
-    const examItem = examGrade ? (currentPeriodItems.find((item) => item.isExam) ?? await createGradeItem(selectedCourse.id, activePeriod.id, "Parcial", 1)) : undefined;
-    for (let index = 0; index < importedStudents.length; index += 1) {
-      for (let itemIndex = 0; itemIndex < createdItems.length; itemIndex += 1) { const value = guidedGrades.filter((grade) => !grade.exam)[itemIndex].values[index]; if (value !== null) await saveGrade({ studentId: importedStudents[index].id, itemId: createdItems[itemIndex].id, value, pending: 0 }); }
-      if (examItem && examGrade?.values[index] !== null) await saveGrade({ studentId: importedStudents[index].id, itemId: examItem.id, value: examGrade!.values[index]!, pending: 0 });
-    }
-    const refreshedStudents = await listStudents(selectedCourse.id); const refreshedItems = await listGradeItems(selectedCourse.id, activePeriod.id);
-    setStudents(refreshedStudents); setGradeItems(refreshedItems); setItemsByPeriod((current) => ({ ...current, [activePeriod.id]: refreshedItems })); setGrades(await listGrades(selectedCourse.id)); setGuidedModal(false); setGuidedStage("students");
-  }
-
   function openRenameActivity(item: GradeItem) {
     if (activeState === "locked") return;
-    setRenameItem(item); setRenameName(item.name); setDeleteActivityConfirm(false); setRenameModal(true);
+    setRenameItem(item); setRenameName(item.name); setDeleteActivityConfirm(false); setDeleteActivityError(""); setRenameModal(true);
   }
 
   async function handleDeleteActivity() {
     if (!renameItem || renameItem.isExam || !activePeriod || activeState === "locked") return;
     const removedId = renameItem.id;
+    setDeleteActivityError("");
     try {
       await deleteGradeItem(removedId);
       const remove = (items: GradeItem[]) => items.filter((item) => item.id !== removedId);
@@ -772,7 +603,9 @@ function App() {
       setGrades((current) => current.filter((grade) => grade.itemId !== removedId));
       setExportColumns((current) => current.filter((key) => key !== removedId));
       setRenameModal(false); setRenameItem(null); setDeleteActivityConfirm(false);
-    } catch { setError("No se pudo eliminar la actividad. Verificá que el corte esté abierto."); }
+    } catch (error) {
+      setDeleteActivityError(`No se pudo eliminar la actividad. No se borró ningún dato. Detalle: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   function openCourseSync() {
@@ -984,34 +817,9 @@ function App() {
     }
   }
 
-  async function handleImport() {
-    if (!selectedCourse || !importPreview) return;
-    let imported = 0;
-    for (const row of importPreview.valid) {
-      try { await createStudent({ ...row, courseId: selectedCourse.id }); imported += 1; } catch { /* database constraints protect against races */ }
-    }
-    setStudents(await listStudents(selectedCourse.id));
-    setCourses((current) => current.map((course) => course.id === selectedCourse.id ? { ...course, students: course.students + imported } : course));
-    setImportPreview(null);
-    setImportModal(false);
-  }
-
   const field = (key: keyof StudentDraft, label: string, type = "text") => (
     <TextInput label={label} value={student[key]} type={type} required error={studentErrors[key]} onChange={(event) => updateStudent(key, event.currentTarget.value)} />
   );
-
-  function handleStudentFile(file: File | null) {
-    if (!file || !selectedCourse) return;
-    file.text().then((text) => {
-      const rows = parseStudentFile(text);
-      setImportPreview(classifyStudentRows(rows, students));
-    });
-  }
-
-  function handleGradeFile(file: File | null) {
-    if (!file) return;
-    file.text().then((text) => setGradeImportData(parseGradeFile(text)));
-  }
 
   function templateFieldOptions() {
     const fixedFields: { key: string; label: string }[] = [
@@ -1110,32 +918,6 @@ function App() {
     }
   }
 
-  async function importGrades() {
-    if (!gradeImportData || !activePeriod || activeState === "locked") return;
-    const activityCount = gradeImportLastIsExam ? Math.max(0, gradeImportData.gradeHeaders.length - 1) : gradeImportData.gradeHeaders.length;
-    const importedItems: GradeItem[] = [];
-    for (let index = 0; index < activityCount; index += 1) {
-      const existing = gradeItems.filter((item) => !item.isExam)[index];
-      importedItems.push(existing ?? await createGradeItem(selectedCourse!.id, activePeriod.id, gradeImportData.gradeHeaders[index] || `Actividad ${index + 1}`));
-    }
-    const exam = gradeImportLastIsExam ? (gradeItems.find((item) => item.isExam) ?? await createGradeItem(selectedCourse!.id, activePeriod.id, gradeImportData.gradeHeaders[gradeImportData.gradeHeaders.length - 1] || "Parcial")) : undefined;
-    for (const row of gradeImportData.rows) {
-      const studentItem = students.find((student) => student.code === row.code);
-      if (!studentItem || row.invalid.length) continue;
-      for (let index = 0; index < importedItems.length; index += 1) {
-        const value = row.values[index];
-        if (value !== null) await saveGrade({ studentId: studentItem.id, itemId: importedItems[index].id, value, pending: 0 });
-      }
-      if (exam && row.values[row.values.length - 1] !== null) await saveGrade({ studentId: studentItem.id, itemId: exam.id, value: row.values[row.values.length - 1]!, pending: 0 });
-    }
-    const nextItems = [...importedItems, ...(exam ? [exam] : [])];
-    setGradeItems(nextItems);
-    setItemsByPeriod((current) => ({ ...current, [activePeriod.id]: nextItems }));
-    setGrades(await listGrades(selectedCourse!.id));
-    setGradeImportData(null);
-    setGradeImportModal(false);
-  }
-
   if (fatalStartupError) {
     return (
       <Container size="sm" py="xl">
@@ -1211,7 +993,7 @@ function App() {
               </section>
             ) : (
               <Stack gap="md">
-                <Group align="flex-end" grow><TextInput label="Buscar estudiante" placeholder="Nombre, código o correo" value={studentSearch} onChange={(event) => setStudentSearch(event.currentTarget.value)} /><Switch label="Vista" aria-label="Alternar entre vista de lista y vista de grupos" checked={viewMode === "groups"} onChange={(event) => setViewMode(event.currentTarget.checked ? "groups" : "list")} onLabel="Grupos" offLabel="Lista" size="lg" /></Group><Group justify="space-between" align="flex-end"><div /><Group><Button variant="default" disabled={activeState !== "active"} onClick={() => setActivityModal(true)}>Agregar actividad</Button><Button color="teal" variant="light" onClick={openGuidedImport} disabled={activeState === "locked"}>Importar notas</Button><Button onClick={() => setStudentModal(true)}>Agregar estudiante</Button><Button variant="default" onClick={() => setImportModal(true)}>Importar estudiantes</Button></Group></Group>
+                <Group align="flex-end" grow><TextInput label="Buscar estudiante" placeholder="Nombre, código o correo" value={studentSearch} onChange={(event) => setStudentSearch(event.currentTarget.value)} /><Switch label="Vista" aria-label="Alternar entre vista de lista y vista de grupos" checked={viewMode === "groups"} onChange={(event) => setViewMode(event.currentTarget.checked ? "groups" : "list")} onLabel="Grupos" offLabel="Lista" size="lg" /></Group><Group justify="space-between" align="flex-end"><div /><Group><Button variant="default" disabled={activeState !== "active"} onClick={() => setActivityModal(true)}>Agregar actividad</Button><Button onClick={() => setStudentModal(true)}>Agregar estudiante</Button></Group></Group>
                 <Group justify="space-between" align="flex-end" wrap="wrap"><Group align="flex-end" wrap="wrap"><Select label="Corte" value={activePeriod?.id ?? null} data={periods.map((period) => ({ value: period.id, label: `Corte ${period.number} · ${periodState(period) === "locked" ? "Cerrado" : "Abierto"}` }))} onChange={(value) => { const index = periods.findIndex((period) => period.id === value); if (index >= 0) void selectPeriod(index); }} /><Button color="blue" variant="light" onClick={openSplitEditor} disabled={activeState === "locked"}>Actividades {activePeriod?.activityPercent ?? 40}% · Parcial {activePeriod?.examPercent ?? 60}%</Button><Button onClick={openRoulette} disabled={!students.length} style={{ background: "linear-gradient(90deg, #ff3b3b, #ff9500, #ffe135, #2ecc71, #3b82f6, #8b5cf6, #ec4899)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, textShadow: "0 1px 2px rgba(0,0,0,0.35)" }}>Ruleta</Button><Menu shadow="md" width={220}><Menu.Target><Button color="violet" variant="light" disabled={!students.length}>Exportar</Button></Menu.Target><Menu.Dropdown><Menu.Item onClick={() => { setExportError(""); setExportModal(true); }}>Exportar imagen</Menu.Item><Menu.Item onClick={() => { setTemplateColumns(["code", "name", "email", ...gradeItems.map((item) => item.id)]); setTemplateModal(true); }}>Exportar planilla</Menu.Item></Menu.Dropdown></Menu><Button color="green" variant="light" disabled={!students.length} onClick={openCampusUpload}>Subir al Campus</Button><Menu shadow="md" width={220}><Menu.Target><Button color="pink" variant="filled" disabled={activeState !== "active"}>Calificar</Button></Menu.Target><Menu.Dropdown>{gradeItems.map((item) => <Menu.Item key={item.id} onClick={() => openGradeWalkthrough(item)}>Calificar {item.name}</Menu.Item>)}</Menu.Dropdown></Menu></Group><Button variant={activeState === "locked" ? "light" : "default"} color={activeState === "locked" ? "green" : "orange"} onClick={() => void togglePeriodClosed()}>{activeState === "locked" ? "Reabrir corte" : "Cerrar corte"}</Button></Group>
                 {viewMode === "groups" ? (() => {
                   const unassignedStudents = filteredStudents.filter((studentItem) => !groupForStudent(studentItem.id));
@@ -1336,11 +1118,8 @@ function App() {
       <Modal opened={deleteCourseModal} onClose={() => { setDeleteCourseModal(false); setDeleteConfirmation(""); setDeleteCourseError(""); }} title="Eliminar curso" centered><Stack><Text c="red">Esta acción elimina permanentemente estudiantes, actividades y notas.</Text><Text size="sm">Escribí exactamente <b>{selectedCourse?.name}</b> para confirmar.</Text><TextInput label="Confirmación" value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.currentTarget.value)} autoFocus />{deleteCourseError ? <Text c="red" size="sm" role="alert">{deleteCourseError}</Text> : null}<Group justify="flex-end"><Button variant="default" onClick={() => setDeleteCourseModal(false)}>Cancelar</Button><Button color="red" onClick={() => void handleDeleteCourse()} disabled={deleteConfirmation.trim() !== selectedCourse?.name}>Eliminar definitivamente</Button></Group></Stack></Modal>
       <Modal opened={courseModal} onClose={() => setCourseModal(false)} title="Crear curso" centered><Stack><TextInput label="Nombre del curso" placeholder="Ej. Cálculo I" value={name} onChange={(event) => setName(event.currentTarget.value)} required /><TextInput label="Semestre" value={semester} onChange={(event) => setSemester(event.currentTarget.value)} required /><Text size="sm" c="dimmed">Se crearán tres cortes abiertos. Podés cerrar o reabrir cada corte manualmente cuando quieras.</Text><Group justify="flex-end"><Button variant="default" onClick={() => setCourseModal(false)}>Cancelar</Button><Button onClick={handleCreateCourse} disabled={!name.trim()}>Crear curso</Button></Group></Stack></Modal>
       <Modal opened={studentModal} onClose={() => setStudentModal(false)} title="Agregar estudiante" centered><Stack>{field("fullName", "Nombre completo")}{field("code", "Código")}{field("documentId", "Documento")}{field("institutionalEmail", "Correo institucional", "email")}{field("personalEmail", "Correo personal", "email")}<Group justify="flex-end"><Button variant="default" onClick={() => setStudentModal(false)}>Cancelar</Button><Button onClick={handleCreateStudent} disabled={Object.values(student).some((value) => !value.trim())}>Agregar</Button></Group></Stack></Modal>
-      <Modal opened={importModal} onClose={() => setImportModal(false)} title="Importar estudiantes" centered><Stack><Text size="sm" c="dimmed">Acepta CSV y archivos .xls exportados como tabla HTML. Se importan Nombre, Documento, Código, Correo 1 y Correo 2; se ignoran Plan de estudios y Estado financiero.</Text><FileButton onChange={handleStudentFile} accept=".csv,.xls,text/csv,application/vnd.ms-excel">{(props) => <Button variant="default" {...props}>Elegir archivo</Button>}</FileButton>{importPreview ? <Stack gap="xs"><Text size="sm"><b>{importPreview.valid.length}</b> listas para importar · <b>{importPreview.duplicate.length}</b> duplicadas · <b>{importPreview.incomplete.length}</b> incompletas · <b>{importPreview.invalid.length}</b> inválidas</Text>{importPreview.incomplete.slice(0, 3).map((item, index) => <Text key={`incomplete-${index}`} size="xs" c="orange">Fila incompleta: {item.reason}</Text>)}{importPreview.invalid.slice(0, 3).map((item, index) => <Text key={`invalid-${index}`} size="xs" c="red">Fila inválida: {item.reason}</Text>)}{importPreview.duplicate.slice(0, 3).map((item, index) => <Text key={`duplicate-${index}`} size="xs" c="dimmed">Fila duplicada: {item.reason}</Text>)}</Stack> : null}<Group justify="flex-end"><Button variant="default" onClick={() => setImportModal(false)}>Cancelar</Button><Button onClick={handleImport} disabled={!importPreview?.valid.length}>Importar</Button></Group></Stack></Modal>
       <Modal opened={templateModal} onClose={() => setTemplateModal(false)} title="Qué querés exportar" centered><Stack><Text size="sm" c="dimmed">Elegí las columnas de la plantilla y después el formato.</Text>{templateFieldOptions().map((column) => <Checkbox key={column.key} label={column.label} checked={templateColumns.includes(column.key)} onChange={(event) => toggleTemplateColumn(column.key, event.currentTarget.checked)} />)}<Text size="sm" c="dimmed">Formato</Text><Group><Button disabled={!templateColumns.length} onClick={() => downloadGradeTemplate("csv")}>CSV</Button><Button variant="light" disabled={!templateColumns.length} onClick={() => downloadGradeTemplate("xls")}>Excel (.xls)</Button></Group></Stack></Modal>
       <Modal opened={exportModal} onClose={() => setExportModal(false)} title={`Elegir columnas · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">Elegí qué información querés incluir en la imagen.</Text>{exportColumnOptions.map((column) => <Checkbox key={column.key} label={column.label} checked={exportColumns.includes(column.key)} onChange={(event) => { const checked = event.currentTarget.checked; setExportColumns((current) => { const safeCurrent = Array.isArray(current) ? current.filter((value): value is string => typeof value === "string") : []; return checked ? safeCurrent.includes(column.key) ? safeCurrent : [...safeCurrent, column.key] : safeCurrent.filter((key) => key !== column.key); }); }} />)}{exportError ? <Text size="sm" c="red">{exportError}</Text> : null}<Group justify="flex-end"><Button variant="default" onClick={() => setExportModal(false)}>Cancelar</Button><Button disabled={!hasExportSelection} onClick={exportPeriodImage}>Descargar imagen</Button></Group></Stack></Modal>
-      <Modal opened={guidedModal} onClose={() => setGuidedModal(false)} title="Carga guiada desde Excel" centered size="lg"><Stack><Text size="sm" c="dimmed">Copiá una columna completa en Excel y pegala acá. La cantidad de filas se detecta automáticamente.</Text>{guidedStage === "students" ? <><Title order={4}>{guidedFields[guidedFieldIndex]}</Title><Textarea minRows={8} value={guidedPaste} onChange={(event) => setGuidedPaste(event.currentTarget.value)} placeholder="Ctrl+V acá" autoFocus /><Button onClick={acceptGuidedStudentColumn}>{guidedFieldIndex === guidedFields.length - 1 ? "Continuar con actividades" : "Siguiente columna"}</Button></> : null}{guidedStage === "activity" ? <><Title order={4}>Actividad {guidedGrades.filter((item) => !item.exam).length + 1}</Title>{guidedGrades.filter((item) => !item.exam).map((item, index) => <Group key={`${item.name}-${index}`} justify="space-between"><Text size="sm">{item.name} · {item.values.length} notas cargadas</Text><Button size="xs" color="red" variant="subtle" onClick={() => removeGuidedActivity(index)}>Quitar</Button></Group>)}<TextInput label="Nombre de la actividad" value={guidedActivityName} onChange={(event) => setGuidedActivityName(event.currentTarget.value)} /><Textarea minRows={8} label="Notas, una por línea" value={guidedPaste} onChange={(event) => setGuidedPaste(event.currentTarget.value)} placeholder="Ctrl+V acá" /><Group><Button onClick={() => acceptGuidedActivity(false)}>Agregar otra actividad</Button><Button onClick={goToGuidedExam}>Agregar parcial</Button><Button variant="filled" onClick={saveGuidedWithoutExam}>Guardar carga</Button></Group></> : null}{guidedStage === "exam" ? <><Title order={4}>Agregar parcial</Title><Text size="sm" c="dimmed">El parcial se carga como una única nota. El cálculo interno lo hacés por fuera.</Text><Textarea minRows={8} label="Notas del parcial, una por línea" value={guidedPaste} onChange={(event) => setGuidedPaste(event.currentTarget.value)} placeholder="Ctrl+V acá" /><Group><Button variant="default" onClick={() => { setGuidedStage("activity"); setGuidedPaste(""); }}>Volver a actividades</Button><Button variant="default" onClick={skipGuidedExam}>Omitir parcial</Button><Button onClick={acceptGuidedExam}>Agregar parcial</Button></Group></> : null}{guidedStage === "preview" ? <><Title order={4}>Revisar carga</Title><Text>{guidedColumns[0]?.length ?? 0} estudiantes · {guidedGrades.length} columnas de notas</Text><Text size="sm">{guidedGrades.map((item) => item.name).join(" · ")}</Text><Group><Button variant="default" onClick={() => setGuidedStage(guidedGrades.some((item) => item.exam) ? "exam" : "activity")}>Volver</Button><Button onClick={() => void persistGuidedImport()}>Guardar carga</Button></Group></> : null}{guidedError ? <Text c="red">{guidedError}</Text> : null}</Stack></Modal>
-      <Modal opened={gradeImportModal} onClose={() => { setGradeImportModal(false); setGradeImportData(null); }} title={`Importar notas · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">Subí la plantilla o un Excel con una columna Código y luego las columnas de notas. Primero se analiza; nada se guarda hasta confirmar.</Text><FileButton onChange={handleGradeFile} accept=".csv,.xls,text/csv,application/vnd.ms-excel">{(props) => <Button variant="default" {...props}>Elegir archivo</Button>}</FileButton>{gradeImportData ? <Stack gap="xs"><Text size="sm">{gradeImportData.rows.length} filas · {gradeImportData.gradeHeaders.length} columnas de notas</Text><Text size="sm">Última columna: <b>{gradeImportData.gradeHeaders[gradeImportData.gradeHeaders.length - 1]}</b></Text><Group><Button size="xs" variant={gradeImportLastIsExam ? "filled" : "light"} onClick={() => setGradeImportLastIsExam(true)}>Es Parcial</Button><Button size="xs" variant={!gradeImportLastIsExam ? "filled" : "light"} onClick={() => setGradeImportLastIsExam(false)}>Es actividad</Button></Group><Text size="xs" c="dimmed">{gradeImportData.rows.filter((row) => !students.some((student) => student.code === row.code)).length} códigos no encontrados · {gradeImportData.rows.filter((row) => row.invalid.length).length} filas inválidas</Text><Group justify="flex-end"><Button variant="default" onClick={() => setGradeImportData(null)}>Cambiar archivo</Button><Button onClick={() => void importGrades()} disabled={gradeImportData.rows.length === 0}>Importar y guardar</Button></Group></Stack> : null}</Stack></Modal>
       <Modal opened={syncModal} onClose={() => { if (syncState !== "reading" && syncState !== "applying") setSyncModal(false); }} title="Sincronizar cursos desde el Campus" centered size="xl">
         <Stack>
           {syncState === "idle" ? <><Text size="sm">NOTAZOD va a leer cada grupo de "Información estudiantes" del Campus. Los grupos que ya tenés como curso solo suman los estudiantes que falten; los demás se crean como cursos nuevos del semestre {currentSemester()}. Los cortes ya cerrados en el Campus se importan como "Nota del Campus" solo si en NOTAZOD ese corte todavía no tiene notas. También se actualizan el programa, horario y salón de cada grupo. No se borra ninguna nota.</Text><Text size="sm" c="dimmed">Primero vas a ver una vista previa. Si el Campus te pide iniciar sesión, hacelo en su ventana.</Text><Group justify="flex-end"><Button variant="default" onClick={() => setSyncModal(false)}>Cancelar</Button><Button color="green" onClick={() => void readCourseSync()}>Leer el Campus</Button></Group></> : null}
@@ -1397,7 +1176,7 @@ function App() {
           })() : null}
         </Stack>
       </Modal>
-      <Modal opened={renameModal} onClose={() => { setRenameModal(false); setDeleteActivityConfirm(false); }} title="Editar actividad" centered><Stack>{deleteActivityConfirm ? <><Text c="red">Vas a eliminar <b>{renameItem?.name}</b> de este corte.</Text><Text size="sm">{renameItemGradeCount ? `Se borrarán también ${renameItemGradeCount} nota${renameItemGradeCount === 1 ? "" : "s"} registrada${renameItemGradeCount === 1 ? "" : "s"} en esta actividad.` : "Esta actividad no tiene notas registradas."} Antes de eliminar se guarda una copia de seguridad interna.</Text><Group justify="flex-end"><Button variant="default" onClick={() => setDeleteActivityConfirm(false)}>Volver</Button><Button color="red" onClick={() => void handleDeleteActivity()}>Eliminar actividad</Button></Group></> : <><TextInput label="Nombre" value={renameName} onChange={(event) => setRenameName(event.currentTarget.value)} autoFocus /><Group justify="space-between">{renameItem && !renameItem.isExam ? <Button variant="subtle" color="red" onClick={() => setDeleteActivityConfirm(true)}>Eliminar actividad</Button> : <div />}<Group><Button variant="default" onClick={() => setRenameModal(false)}>Cancelar</Button><Button onClick={() => void handleRenameActivity()} disabled={!renameName.trim()}>Guardar</Button></Group></Group></>}</Stack></Modal>
+      <Modal opened={renameModal} onClose={() => { setRenameModal(false); setDeleteActivityConfirm(false); setDeleteActivityError(""); }} title="Editar actividad" centered><Stack>{deleteActivityConfirm ? <><Text c="red">Vas a eliminar <b>{renameItem?.name}</b> de este corte.</Text><Text size="sm">{renameItemGradeCount ? `Se borrarán también ${renameItemGradeCount} nota${renameItemGradeCount === 1 ? "" : "s"} registrada${renameItemGradeCount === 1 ? "" : "s"} en esta actividad.` : "Esta actividad no tiene notas registradas."} Antes de eliminar se guarda una copia de seguridad interna.</Text>{deleteActivityError ? <Text c="red" size="sm" role="alert">{deleteActivityError}</Text> : null}<Group justify="flex-end"><Button variant="default" onClick={() => { setDeleteActivityConfirm(false); setDeleteActivityError(""); }}>Volver</Button><Button color="red" onClick={() => void handleDeleteActivity()}>Eliminar actividad</Button></Group></> : <><TextInput label="Nombre" value={renameName} onChange={(event) => setRenameName(event.currentTarget.value)} autoFocus /><Group justify="space-between">{renameItem && !renameItem.isExam ? <Button variant="subtle" color="red" onClick={() => setDeleteActivityConfirm(true)}>Eliminar actividad</Button> : <div />}<Group><Button variant="default" onClick={() => setRenameModal(false)}>Cancelar</Button><Button onClick={() => void handleRenameActivity()} disabled={!renameName.trim()}>Guardar</Button></Group></Group></>}</Stack></Modal>
       <Modal opened={activityModal} onClose={() => setActivityModal(false)} title={`Agregar actividad · Corte ${activePeriod?.number ?? ""}`} centered><Stack><TextInput label="Nombre de la actividad" placeholder="Ej. Taller 2" value={activityName} onChange={(event) => setActivityName(event.currentTarget.value)} autoFocus required /><Group justify="flex-end"><Button variant="default" onClick={() => setActivityModal(false)}>Cancelar</Button><Button onClick={() => void handleCreateActivity()} disabled={!activityName.trim()}>Agregar</Button></Group></Stack></Modal>
       <Modal opened={splitModal} onClose={() => setSplitModal(false)} title={`Porcentajes · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">La suma debe ser exactamente 100%.</Text><NumberInput label="Actividades" suffix=" %" min={0} max={100} value={activityPercent} onChange={(value) => { const next = typeof value === "number" ? value : 0; setActivityPercent(next); setExamPercent(100 - next); }} /><NumberInput label="Parcial" suffix=" %" min={0} max={100} value={examPercent} onChange={(value) => { const next = typeof value === "number" ? value : 0; setExamPercent(next); setActivityPercent(100 - next); }} /><Text c={activityPercent + examPercent === 100 ? "green" : "red"}>Total: {activityPercent + examPercent}%</Text><Group justify="flex-end"><Button variant="default" onClick={() => setSplitModal(false)}>Cancelar</Button><Button onClick={() => void saveSplit()} disabled={activityPercent + examPercent !== 100}>Guardar</Button></Group></Stack></Modal>
       <Modal opened={groupManageModal} onClose={() => { setGroupManageModal(false); setRenameGroupTarget(null); setRenameGroupName(""); }} title={`Grupos · Corte ${activePeriod?.number ?? ""}`} centered>

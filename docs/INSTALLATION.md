@@ -50,8 +50,8 @@ If Windows SmartScreen displays a warning, verify that the installer was downloa
 
 ## First launch
 
-1. Create a course with its semester.
-2. Add students manually, import a supported student list, or use **Importar notas** for the guided clipboard workflow.
+1. Use **Sincronizar cursos** to bring courses and students from the Campus, or create a course with its semester.
+2. Add students manually when a course needs someone the Campus does not list.
 3. Select a period from the **Corte** selector.
 4. Configure the Activities/Parcial split if needed.
 5. Enter grades or click a grade cell to edit it.
@@ -201,7 +201,7 @@ The release is created as a draft so the maintainer can verify the artifacts bef
 - [ ] Run `cargo check --manifest-path src-tauri/Cargo.toml`.
 - [ ] Build the macOS `.app` and `.dmg` artifacts.
 - [ ] Build the Windows `.msi` artifact on Windows or a configured Windows CI runner.
-- [ ] Test first launch, course creation, student import, guided paste, grade editing, period closure, and exports.
+- [ ] Test first launch, course creation, Campus course sync, manual student entry, grade editing, period closure, and exports.
 - [ ] Confirm the database migration starts correctly from an existing V1 installation.
 - [ ] Publish artifacts and checksums to GitHub Releases.
 - [ ] Document known issues and rollback instructions.

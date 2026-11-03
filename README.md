@@ -14,8 +14,8 @@ NOTAZOD helps teachers manage courses, students, activities, periods, and grades
 ## What NOTAZOD does
 
 - Manage multiple courses and student lists.
-- Import students from CSV or HTML-table `.xls` files.
-- Import data through a guided clipboard workflow: copy one Excel column, paste it, and continue.
+- Synchronize courses and students from the university Campus, and upload grades back to it.
+- Add students manually.
 - Create activities and enter a single Parcial grade per period.
 - Configure the Activities/Parcial split automatically (for example, 40/60 or 30/70).
 - Edit a grade directly from the table or from the student detail modal.
@@ -93,7 +93,7 @@ The main workflow is intentionally compact:
 5. Close a period when grades are complete.
 6. Export only the information needed.
 
-![Import and grading workflow](docs/assets/notazod-workflow.svg)
+![Grading workflow](docs/assets/notazod-workflow.svg)
 
 ## Technology
 
@@ -126,7 +126,7 @@ NOTAZOD is offline-first. Course data is stored locally on the teacher's compute
 
 ## Current scope: V1
 
-V1 is frozen around the core teacher workflow: courses, students, guided clipboard import, activities, periods, calculations, editing, and exports. It also includes automatic/manual backups and a restart-based backup restore (see [docs/INSTALLATION.md](docs/INSTALLATION.md#restart-based-restore)). Future releases may add richer reports, signed installers, and automatic updates.
+V1 is frozen around the core teacher workflow: courses, students, activities, periods, calculations, editing, and exports. It also includes automatic/manual backups and a restart-based backup restore (see [docs/INSTALLATION.md](docs/INSTALLATION.md#restart-based-restore)). Future releases may add richer reports, signed installers, and automatic updates.
 
 ## License
 
