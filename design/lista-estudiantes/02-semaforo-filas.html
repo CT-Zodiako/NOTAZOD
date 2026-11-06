@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Semáforo por estudiante</title>
+<style>
+:root{--text:#20242D;--muted:#667085;--onPrimary:#FFFFFF;--surface:#F7F8FA;--subtle:#EEF1F5;--raised:#FFFFFF;--primary:#8C3F5B;--primaryHover:#713249;--border:#98A2B3;--focus:#C89A3D;--borderSubtle:#DDE2EA;--failing:#C42B30;--pending:#7C3AED;--passing:#237A35;--computed:#FDF6E3;--locked:#475F7A;--empty:#6B6B73;--warning:#B45309}
+[data-theme=dark]{--text:#F3F0F2;--muted:#A9B1BF;--surface:#12161D;--subtle:#1A202A;--raised:#232B38;--primary:#C46A87;--primaryHover:#D1849D;--border:#536071;--focus:#E0B85A;--borderSubtle:#303A48;--failing:#FF7A7A;--pending:#B794F6;--passing:#5FCB7A;--computed:#2B2616;--locked:#9DB3CC;--empty:#A1A1AA;--warning:#F59E0B}
+*{box-sizing:border-box}
+body{margin:0;background:var(--surface);color:var(--text);font:16px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+button,select{font:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.app-header{height:40px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;background:var(--raised);border-bottom:1px solid var(--borderSubtle)}
+.brand{font-weight:700;letter-spacing:.06em;color:var(--primary)}
+main{max-width:1180px;margin:auto;padding:24px}
+.hero{display:flex;justify-content:space-between;align-items:center;gap:24px;background:linear-gradient(120deg,color-mix(in srgb,var(--primary) 22%,var(--raised)),var(--raised));border:1px solid var(--borderSubtle);border-radius:8px;padding:24px;margin-bottom:16px}
+h1{font-size:32px;line-height:1.25;margin:0}
+.muted{color:var(--muted);font-size:14px;margin:4px 0 0}
+.ring{--p:0;width:96px;height:96px;border-radius:9999px;display:grid;place-items:center;background:conic-gradient(var(--passing) calc(var(--p)*1%),var(--failing) 0)}
+.ring div{width:76px;height:76px;border-radius:9999px;background:var(--raised);display:grid;place-items:center;text-align:center;font-size:13px;color:var(--muted)}
+.ring b{display:block;font-size:20px;color:var(--text)}
+.bar{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;margin-bottom:16px}
+.filters{display:flex;gap:8px;flex-wrap:wrap}
+.pill{height:32px;border-radius:9999px;padding:0 14px;border:1px solid var(--borderSubtle);background:var(--raised);color:var(--text);font-size:14px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.pill[aria-pressed=true]{border-color:var(--c,var(--primary));color:var(--c,var(--primary));background:color-mix(in srgb,var(--c,var(--primary)) 14%,var(--raised))}
+.pill small{font-size:13px;opacity:.8}
+.btn{height:32px;border-radius:6px;padding:0 12px;border:1px solid var(--borderSubtle);background:var(--raised);color:var(--text);font-size:14px;font-weight:700;cursor:pointer}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:var(--onPrimary)}
+.list{display:flex;flex-direction:column;gap:8px}
+.row{display:grid;grid-template-columns:40px minmax(240px,1.4fr) 1.6fr 120px 110px;gap:16px;align-items:center;background:var(--raised);border:1px solid var(--borderSubtle);border-left:6px solid var(--c);border-radius:8px;padding:12px 16px}
+.row:hover{border-color:var(--c)}
+.avatar{width:36px;height:36px;border-radius:9999px;display:grid;place-items:center;font-size:13px;font-weight:700;background:color-mix(in srgb,var(--c) 20%,var(--raised));color:var(--c)}
+.who b{display:block;font-size:14px}
+.who span{font-size:13px;color:var(--muted)}
+.dots{display:flex;gap:6px;flex-wrap:wrap}
+.dot{font-size:13px;font-weight:700;border-radius:6px;padding:2px 6px;color:var(--d);background:color-mix(in srgb,var(--d) 14%,transparent)}
+.dot em{font-style:normal;font-weight:400;color:var(--muted);margin-right:4px}
+.meter{position:relative;height:8px;border-radius:9999px;background:var(--subtle);margin-top:6px}
+.meter i{position:absolute;inset:0 auto 0 0;border-radius:9999px;background:var(--c)}
+.meter s{position:absolute;left:60%;top:-3px;bottom:-3px;width:2px;background:var(--muted)}
+.score{font-size:20px;font-weight:700;color:var(--c)}
+.score small{display:block;font-size:13px;font-weight:400;color:var(--muted)}
+.tag{justify-self:end;font-size:13px;font-weight:700;border-radius:9999px;padding:4px 10px;color:var(--c);background:color-mix(in srgb,var(--c) 14%,transparent)}
+</style>
+</head>
+<body>
+<header class="app-header"><span class="brand">NOTAZOD</span><button class="btn" id="theme" aria-label="Cambiar tema claro u oscuro">Tema</button></header>
+<main>
+  <section class="hero">
+    <div>
+      <p class="muted">2026-2 · Grupo B Diurno · Salón 204</p>
+      <h1>Fundamentos de programación</h1>
+      <p class="muted">Corte 2 abierto · Actividades 40% · Examen final 60%</p>
+    </div>
+    <div class="ring" id="ring" role="img" aria-label="Porcentaje de estudiantes aprobando"><div><span><b id="pct">—</b>aprobando</span></div></div>
+  </section>
+  <div class="bar">
+    <div class="filters" role="group" aria-label="Filtrar estudiantes">
+      <button class="pill" aria-pressed="true" data-f="all">Todos <small id="n-all"></small></button>
+      <button class="pill" aria-pressed="false" data-f="risk" style="--c:var(--failing)">En riesgo <small id="n-risk"></small></button>
+      <button class="pill" aria-pressed="false" data-f="pend" style="--c:var(--pending)">Pendientes <small id="n-pend"></small></button>
+      <button class="pill" aria-pressed="false" data-f="ok" style="--c:var(--passing)">Al día <small id="n-ok"></small></button>
+    </div>
+    <div class="filters"><button class="btn">Subir al Campus</button><button class="btn primary">Calificar</button></div>
+  </div>
+  <div class="list" id="list" aria-live="polite"></div>
+</main>
+<script>
+const A=["Taller 1","Quiz 1","Taller 2","Proyecto"];
+const S=[["Álvarez Muñoz Juan Esteban","220126001",[4.5,4,4.8,4.2],4.1],["Bolaños Rivera Laura Sofía","220126003",[5,4.6,4.9,4.7],4.8],["Castillo Ortega Mateo","220126007",[3.2,"P",2.8,3],2.4],["Daza Guerrero Valentina","220126009",[4,3.8,4.1,4],3.6],["Erazo Chicangana Samuel","220126011",[2,1.5,null,2.5],1.8],["Fernández Pino Isabella","220126014",[4.8,5,4.7,5],4.9],["Gómez Hurtado Sebastián","220126017",[3.5,3,"P",3.8],3.2],["Hernández Méndez Daniela","220126021",[4.2,4.4,4,4.6],4.5],["Ibarra Solarte Tomás","220126024",[1,2,1.5,null],null],["Jiménez Ruano Mariana","220126027",[4.9,4.7,5,4.8],4.6],["López Cerón Andrés Felipe","220126030",[3,3.4,3.1,"P"],3],["Muñoz Paz Gabriela","220126033",[3.8,4,3.6,4.2],3.9],["Narváez Bravo David","220126036",[2.5,3,2.8,2.6],2.9]];
+const fmt=v=>v.toFixed(1).replace(".",",");const val=v=>typeof v==="number"?v:0;
+const col=v=>v==="P"?"var(--pending)":v==null?"var(--empty)":v<3?"var(--failing)":"var(--passing)";
+const data=S.map(([n,c,acts,ex])=>{const g=acts.reduce((s,v)=>s+val(v),0)/acts.length*.4+val(ex)*.6;const k=acts.includes("P")?"pend":g<3?"risk":"ok";return{n,c,acts,ex,g,k}}).sort((a,b)=>a.g-b.g);
+const meta={risk:["var(--failing)","En riesgo"],pend:["var(--pending)","Pendiente"],ok:["var(--passing)","Al día"]};
+const ini=n=>n.split(" ").filter((_,i)=>i===0||i===2).map(w=>w[0]).join("");
+function render(f){document.getElementById("list").innerHTML=data.filter(d=>f==="all"||d.k===f).map(d=>{const[c,label]=meta[d.k];return`<article class="row" style="--c:${c}"><span class="avatar" aria-hidden="true">${ini(d.n)}</span><div class="who"><b>${d.n}</b><span>${d.c}</span></div><div><div class="dots">${d.acts.map((v,i)=>`<span class="dot" style="--d:${col(v)}"><em>${A[i]}</em>${v==="P"?"Pend.":v==null?"—":fmt(v)}</span>`).join("")}<span class="dot" style="--d:${col(d.ex)}"><em>Examen</em>${d.ex==null?"—":fmt(d.ex)}</span></div><div class="meter" aria-hidden="true"><i style="width:${d.g/5*100}%"></i><s></s></div></div><div class="score">${fmt(d.g)}<small>Nota del corte</small></div><span class="tag">${label}</span></article>`}).join("")}
+const count=k=>data.filter(d=>k==="all"||d.k===k).length;
+["all","risk","pend","ok"].forEach(k=>document.getElementById("n-"+k).textContent=count(k));
+const ok=data.filter(d=>d.g>=3).length,p=Math.round(ok/data.length*100);
+document.getElementById("ring").style.setProperty("--p",p);document.getElementById("pct").textContent=p+"%";
+document.querySelectorAll(".pill").forEach(b=>b.onclick=()=>{document.querySelectorAll(".pill").forEach(x=>x.setAttribute("aria-pressed",x===b));render(b.dataset.f)});
+render("all");
+document.getElementById("theme").onclick=()=>{const r=document.documentElement;r.dataset.theme=r.dataset.theme==="dark"?"light":"dark"};
+</script>
+</body>
+</html>

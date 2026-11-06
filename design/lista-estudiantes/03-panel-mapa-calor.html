@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Panel lateral y mapa de calor</title>
+<style>
+:root{--text:#20242D;--muted:#667085;--onPrimary:#FFFFFF;--surface:#F7F8FA;--subtle:#EEF1F5;--raised:#FFFFFF;--primary:#8C3F5B;--primaryHover:#713249;--border:#98A2B3;--focus:#C89A3D;--borderSubtle:#DDE2EA;--failing:#C42B30;--pending:#7C3AED;--passing:#237A35;--computed:#FDF6E3;--locked:#475F7A;--empty:#6B6B73;--warning:#B45309}
+[data-theme=dark]{--text:#F3F0F2;--muted:#A9B1BF;--surface:#12161D;--subtle:#1A202A;--raised:#232B38;--primary:#C46A87;--primaryHover:#D1849D;--border:#536071;--focus:#E0B85A;--borderSubtle:#303A48;--failing:#FF7A7A;--pending:#B794F6;--passing:#5FCB7A;--computed:#2B2616;--locked:#9DB3CC;--empty:#A1A1AA;--warning:#F59E0B}
+*{box-sizing:border-box}
+body{margin:0;background:var(--surface);color:var(--text);font:16px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;display:grid;grid-template-columns:260px 1fr;min-height:100vh}
+button{font:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+aside{background:var(--raised);border-right:1px solid var(--borderSubtle);padding:16px;display:flex;flex-direction:column;gap:24px}
+.brand{font-weight:700;letter-spacing:.06em;color:var(--primary)}
+.label{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:0 0 8px}
+nav a{display:flex;justify-content:space-between;padding:8px 12px;border-radius:6px;color:var(--text);text-decoration:none;font-size:14px}
+nav a[aria-current]{background:color-mix(in srgb,var(--primary) 18%,var(--raised));color:var(--primary);font-weight:700}
+nav a:hover{background:var(--subtle)}
+nav small{color:var(--muted)}
+.seg{display:flex;flex-direction:column;gap:4px}
+.seg button{display:flex;justify-content:space-between;align-items:center;height:32px;padding:0 12px;border-radius:6px;border:1px solid transparent;background:none;color:var(--text);font-size:14px;cursor:pointer;text-align:left}
+.seg button::before{content:"";width:8px;height:8px;border-radius:9999px;background:var(--c,var(--muted));margin-right:8px}
+.seg button span{flex:1}
+.seg button[aria-pressed=true]{border-color:var(--c,var(--primary));background:color-mix(in srgb,var(--c,var(--primary)) 12%,var(--raised));font-weight:700}
+.seg b{font-size:13px;color:var(--muted)}
+main{padding:24px;min-width:0}
+.top{display:flex;justify-content:space-between;align-items:end;gap:16px;margin-bottom:16px}
+h1{font-size:24px;line-height:1.25;margin:0}
+.muted{color:var(--muted);font-size:14px;margin:4px 0 0}
+.tabs{display:inline-flex;background:var(--subtle);border-radius:8px;padding:4px;gap:4px}
+.tabs button{height:28px;padding:0 12px;border-radius:6px;border:0;background:none;color:var(--muted);font-size:14px;font-weight:700;cursor:pointer}
+.tabs button[aria-selected=true]{background:var(--raised);color:var(--text)}
+.tabs .lock{color:var(--locked)}
+.actions{display:flex;gap:8px}
+.btn{height:32px;border-radius:6px;padding:0 12px;border:1px solid var(--borderSubtle);background:var(--raised);color:var(--text);font-size:14px;font-weight:700;cursor:pointer}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:var(--onPrimary)}
+.table-wrap{background:var(--raised);border:1px solid var(--borderSubtle);border-radius:8px;overflow:auto}
+table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
+th,td{padding:0 8px;height:32px;border-bottom:1px solid var(--borderSubtle);white-space:nowrap}
+thead th{background:var(--subtle);color:var(--muted);text-align:center;font-weight:700}
+thead th:nth-child(-n+2){text-align:left}
+td.name{min-width:260px;font-weight:500}
+td.name small{display:block;color:var(--muted);font-weight:400}
+td.h{width:72px;text-align:center;font-weight:700;color:var(--text);background:color-mix(in srgb,var(--hc) var(--hp),transparent)}
+td.h.pend{color:var(--pending);background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--pending) 18%,transparent) 0 6px,transparent 6px 12px)}
+td.h.empty{color:var(--empty);font-weight:400}
+td.corte{width:88px;text-align:center;font-size:14px;font-weight:700;background:var(--computed);border-left:2px solid var(--borderSubtle)}
+td.corte.fail{color:var(--failing)}td.corte.pass{color:var(--passing)}
+.campus{font-size:13px;font-weight:700;border-radius:9999px;padding:2px 8px;color:var(--c);background:color-mix(in srgb,var(--c) 14%,transparent)}
+tbody tr:hover td.name{background:var(--subtle)}
+.tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin-bottom:16px}
+.tools .left,.tools .right{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.search{height:32px;width:240px;border-radius:6px;border:1px solid var(--border);background:var(--raised);color:var(--text);padding:0 12px;font:inherit;font-size:14px}
+.menu{position:relative}
+.menu ul{display:none;position:absolute;right:0;top:36px;z-index:5;list-style:none;margin:0;padding:4px;min-width:220px;background:var(--raised);border:1px solid var(--borderSubtle);border-radius:8px;box-shadow:0px 8px 24px 0px #18181B33}
+.menu.open ul{display:block}
+.menu li button{width:100%;text-align:left;height:32px;padding:0 12px;border:0;border-radius:6px;background:none;color:var(--text);font-size:14px;cursor:pointer}
+.menu li button:hover{background:var(--subtle)}
+.menu li button.danger{color:var(--failing)}
+.btn.warn{color:var(--warning);border-color:color-mix(in srgb,var(--warning) 50%,var(--borderSubtle))}
+.btn.ghost{border-style:dashed}
+.views{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+thead th.edit{cursor:pointer}
+thead th.edit:hover{color:var(--primary)}
+td.name{cursor:pointer}
+td.name:hover b{color:var(--primary);text-decoration:underline}
+td.h{cursor:pointer}
+td.h:hover{outline:2px solid var(--focus);outline-offset:-2px}
+.side-actions{display:flex;flex-direction:column;gap:4px;margin-top:auto}
+.side-actions button{height:32px;text-align:left;padding:0 12px;border:0;border-radius:6px;background:none;color:var(--text);font-size:14px;cursor:pointer}
+.side-actions button:hover{background:var(--subtle)}
+.side-actions .accent{color:var(--primary);font-weight:700}
+.groups{display:none;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.groups.on{display:grid}
+.gcard{background:var(--raised);border:1px solid var(--borderSubtle);border-radius:8px;padding:16px}
+.gcard h3{font-size:16px;margin:0 0 8px;display:flex;justify-content:space-between}
+.gcard p{margin:4px 0;font-size:13px}
+.gcard.none{border-style:dashed}
+.scale{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;color:var(--muted)}
+.scale span{display:inline-block;width:160px;height:8px;border-radius:9999px;background:linear-gradient(90deg,color-mix(in srgb,var(--failing) 55%,transparent),color-mix(in srgb,var(--failing) 10%,transparent) 55%,color-mix(in srgb,var(--passing) 15%,transparent) 62%,color-mix(in srgb,var(--passing) 55%,transparent))}
+</style>
+</head>
+<body>
+<aside>
+  <span class="brand">NOTAZOD</span>
+  <div><p class="label">Cursos 2026-2</p>
+    <nav aria-label="Cursos">
+      <a href="#" aria-current="page">Fundamentos de programación <small>13</small></a>
+      <a href="#">Programación orientada a objetos I <small>27</small></a>
+      <a href="#">Aplicaciones web II <small>17</small></a>
+      <a href="#">Bases de datos <small>22</small></a>
+    </nav>
+  </div>
+  <div><p class="label">Mostrar</p>
+    <div class="seg" role="group" aria-label="Filtrar estudiantes">
+      <button aria-pressed="true" data-f="all"><span>Todos</span><b id="n-all"></b></button>
+      <button aria-pressed="false" data-f="risk" style="--c:var(--failing)"><span>En riesgo</span><b id="n-risk"></b></button>
+      <button aria-pressed="false" data-f="pend" style="--c:var(--pending)"><span>Con pendientes</span><b id="n-pend"></b></button>
+      <button aria-pressed="false" data-f="campus" style="--c:var(--warning)"><span>Sin subir al Campus</span><b id="n-campus"></b></button>
+    </div>
+  </div>
+  <div class="side-actions"><p class="label">Campus y datos</p>
+    <button class="accent">+ Crear curso</button>
+    <button>Sincronizar cursos</button>
+    <button>Verificar Campus</button>
+    <button>Abrir Campus</button>
+    <button>Exportar copia de seguridad</button>
+    <button>Restaurar copia de seguridad</button>
+    <button>Buscar actualizaciones</button>
+    <button id="theme" aria-label="Cambiar tema claro u oscuro">Tema claro / oscuro</button>
+  </div>
+</aside>
+<main>
+  <div class="top">
+    <div>
+      <h1>Fundamentos de programación</h1>
+      <p class="muted">Grupo B Diurno · Salón 204 · Actividades 40% · Examen final 60%</p>
+    </div>
+    <div class="actions">
+      <button class="btn">Subir al Campus</button>
+      <div class="menu"><button class="btn primary" aria-haspopup="menu">Calificar ▾</button><ul role="menu"><li><button>Calificar Taller 1</button></li><li><button>Calificar Quiz 1</button></li><li><button>Calificar Taller 2</button></li><li><button>Calificar Proyecto</button></li><li><button>Calificar Examen final</button></li><li><button>Calificar grupo</button></li></ul></div>
+      <div class="menu"><button class="btn" aria-haspopup="menu" aria-label="Más acciones del curso">⋯</button><ul role="menu"><li><button>Historial de notas</button></li><li><button>Deshacer última nota</button></li><li><button class="danger">Eliminar curso</button></li></ul></div>
+    </div>
+  </div>
+  <div class="views">
+    <div class="tabs" role="tablist" aria-label="Cortes">
+      <button role="tab" class="lock" aria-selected="false">Corte 1 · Cerrado</button>
+      <button role="tab" aria-selected="true">Corte 2 · Abierto</button>
+      <button role="tab" aria-selected="false">Corte 3</button>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Vista">
+      <button role="tab" aria-selected="true" data-v="list">Notas</button>
+      <button role="tab" aria-selected="false" data-v="groups">Grupos</button>
+    </div>
+  </div>
+  <div class="tools">
+    <div class="left">
+      <input class="search" type="search" placeholder="Nombre, código o correo" aria-label="Buscar estudiante">
+      <button class="btn">Actividades 40% · Examen final 60%</button>
+      <button class="btn ghost">+ Agregar actividad</button>
+      <button class="btn ghost">+ Agregar estudiante</button>
+    </div>
+    <div class="right">
+      <button class="btn" style="background:linear-gradient(90deg,#ff3b3b,#ff9500,#ffe135,#2ecc71,#3b82f6,#8b5cf6,#ec4899);color:#fff;border:none;text-shadow:0 1px 2px rgba(0,0,0,.35)">Ruleta</button>
+      <div class="menu"><button class="btn" aria-haspopup="menu">Exportar ▾</button><ul role="menu"><li><button>Exportar imagen</button></li><li><button>Exportar planilla</button></li></ul></div>
+      <button class="btn warn">Cerrar corte</button>
+    </div>
+  </div>
+  <section class="groups" id="groups" aria-label="Grupos del corte">
+    <article class="gcard"><h3>Grupo 1 <small class="muted">4</small></h3><p>Álvarez Muñoz Juan Esteban</p><p>Bolaños Rivera Laura Sofía</p><p>Castillo Ortega Mateo</p><p>Daza Guerrero Valentina</p></article>
+    <article class="gcard"><h3>Grupo 2 <small class="muted">4</small></h3><p>Erazo Chicangana Samuel</p><p>Fernández Pino Isabella</p><p>Gómez Hurtado Sebastián</p><p>Hernández Méndez Daniela</p></article>
+    <article class="gcard none"><h3>Estudiantes sin grupo <small class="muted">5</small></h3><p>Ibarra Solarte Tomás</p><p>Jiménez Ruano Mariana</p><p>López Cerón Andrés Felipe</p><p>Muñoz Paz Gabriela</p><p>Narváez Bravo David</p></article>
+    <div class="tools" style="grid-column:1/-1;margin:0"><div class="left"><button class="btn ghost">+ Crear grupo</button><button class="btn">Copiar grupos de otro corte</button><button class="btn">Calificar grupo</button></div></div>
+  </section>
+  <div class="table-wrap" id="list">
+    <table>
+      <thead><tr><th>#</th><th>Estudiante</th><th class="edit" title="Editar nombre">Taller 1 ✎</th><th class="edit" title="Editar nombre">Quiz 1 ✎</th><th class="edit" title="Editar nombre">Taller 2 ✎</th><th class="edit" title="Editar nombre">Proyecto ✎</th><th class="edit" title="Editar nombre">Examen final ✎</th><th>Nota del corte</th><th>Acumulada</th><th>Campus</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <p class="scale">0,0 <span aria-hidden="true"></span> 5,0 · el color se intensifica cuanto más lejos está la nota de 3,0 · rayado = pendiente</p>
+</main>
+<script>
+const S=[["Álvarez Muñoz Juan Esteban","220126001",[4.5,4,4.8,4.2],4.1,"ok"],["Bolaños Rivera Laura Sofía","220126003",[5,4.6,4.9,4.7],4.8,"ok"],["Castillo Ortega Mateo","220126007",[3.2,"P",2.8,3],2.4,"diff"],["Daza Guerrero Valentina","220126009",[4,3.8,4.1,4],3.6,"ok"],["Erazo Chicangana Samuel","220126011",[2,1.5,null,2.5],1.8,"miss"],["Fernández Pino Isabella","220126014",[4.8,5,4.7,5],4.9,"ok"],["Gómez Hurtado Sebastián","220126017",[3.5,3,"P",3.8],3.2,"miss"],["Hernández Méndez Daniela","220126021",[4.2,4.4,4,4.6],4.5,"ok"],["Ibarra Solarte Tomás","220126024",[1,2,1.5,null],null,"ok"],["Jiménez Ruano Mariana","220126027",[4.9,4.7,5,4.8],4.6,"ok"],["López Cerón Andrés Felipe","220126030",[3,3.4,3.1,"P"],3,"ok"],["Muñoz Paz Gabriela","220126033",[3.8,4,3.6,4.2],3.9,"ok"],["Narváez Bravo David","220126036",[2.5,3,2.8,2.6],2.9,"ok"]];
+const fmt=v=>v.toFixed(1).replace(".",",");const val=v=>typeof v==="number"?v:0;
+const heat=v=>{if(v==="P")return`class="h pend">Pend.`;if(v==null)return`class="h empty">—`;const far=Math.min(Math.abs(v-3)/2,1);return`class="h" style="--hc:var(${v<3?"--failing":"--passing"});--hp:${Math.round(10+far*45)}%">${fmt(v)}`};
+const CAMPUS={ok:["var(--passing)","✓ Subida"],miss:["var(--failing)","Falta"],diff:["var(--warning)","Distinta"]};
+const C1=[4.3,4.9,3.1,3.9,2.6,5,3.4,4.8,2.2,4.9,3.3,4.1,2.7];
+const data=S.map(([n,c,acts,ex,cp],i)=>{const g=acts.reduce((s,v)=>s+val(v),0)/acts.length*.4+val(ex)*.6;return{n,c,acts,ex,cp,g,c1:C1[i],risk:g<3,pend:acts.includes("P")}});
+const pass={all:()=>true,risk:d=>d.risk,pend:d=>d.pend,campus:d=>d.cp!=="ok"};
+function render(f){document.getElementById("rows").innerHTML=data.filter(pass[f]).map((d,i)=>{const[c,t]=CAMPUS[d.cp];return`<tr><td>${i+1}</td><td class="name" title="Ver información y notas"><b>${d.n}</b><small>${d.c} · ${d.c}@unimayor.edu.co</small></td>${d.acts.map(v=>`<td ${heat(v)}</td>`).join("")}<td ${heat(d.ex)}</td><td class="corte ${d.risk?"fail":"pass"}">${fmt(d.g)}</td><td style="text-align:center">${fmt(d.c1*.3)}</td><td><span class="campus" style="--c:${c}">${t}</span></td></tr>`}).join("")}
+Object.keys(pass).forEach(k=>document.getElementById("n-"+k).textContent=data.filter(pass[k]).length);
+document.querySelectorAll(".seg button").forEach(b=>b.onclick=()=>{document.querySelectorAll(".seg button").forEach(x=>x.setAttribute("aria-pressed",x===b));render(b.dataset.f)});
+render("all");
+document.querySelectorAll(".menu > button").forEach(b=>b.onclick=e=>{e.stopPropagation();const m=b.parentElement,o=!m.classList.contains("open");document.querySelectorAll(".menu").forEach(x=>x.classList.remove("open"));m.classList.toggle("open",o)});
+document.addEventListener("click",()=>document.querySelectorAll(".menu").forEach(x=>x.classList.remove("open")));
+document.querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{document.querySelectorAll("[data-v]").forEach(x=>x.setAttribute("aria-selected",x===b));const g=b.dataset.v==="groups";document.getElementById("groups").classList.toggle("on",g);document.getElementById("list").hidden=g});
+document.getElementById("theme").onclick=()=>{const r=document.documentElement;r.dataset.theme=r.dataset.theme==="dark"?"light":"dark"};
+</script>
+</body>
+</html>

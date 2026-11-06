@@ -1,0 +1,9 @@
+{
+  "title": "Lista de estudiantes del curso",
+  "brief": "Course view with the student grade list, with color for grade states (passing, failing, pending, locked, empty). Dark theme by default with a light toggle; uses the NOTAZOD tokens.",
+  "artboards": [
+    { "file": "01-planilla-color.html", "title": "Planilla con color", "tradeoff": "Closest to today's table, low migration cost; adds summary cards and tinted grade chips. Still dense, risk is read cell by cell.", "width": 1440, "height": 900 },
+    { "file": "02-semaforo-filas.html", "title": "Semáforo por estudiante", "tradeoff": "Each student is a row with a status stripe, progress bar against 3,0 and filters; at-risk first. Very scannable, but shows fewer students per screen and is weaker for fast grade entry.", "width": 1440, "height": 900 },
+    { "file": "03-panel-mapa-calor.html", "title": "Panel lateral y mapa de calor", "tradeoff": "Sidebar with courses and filters (including 'Sin subir al Campus'), corte tabs and heat-map cells. Best for triage and ties into Verificar Campus; biggest layout change.", "width": 1440, "height": 900 }
+  ]
+}

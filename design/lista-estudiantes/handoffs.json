@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "chosen": "03-panel-mapa-calor.html",
+  "handoffs": {
+    "03-panel-mapa-calor.html": {
+      "status": "in_progress",
+      "queued": false,
+      "sentAt": "2026-11-06T22:53:10.360Z",
+      "startedAt": "2026-11-06T22:53:29.191Z",
+      "implementedAt": null,
+      "note": "Starting on branch feature/student-list-redesign in NOTAZOD Test."
+    }
+  }
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { check, Update } from "@tauri-apps/plugin-updater";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -15,6 +15,7 @@ import {
   Modal,
   NumberInput,
   Progress,
+  SegmentedControl,
   Select,
   SimpleGrid,
   Stack,
@@ -29,6 +30,16 @@ import { assignStudentToGroup, copyGroupsFromPeriod, Course, createCourse, creat
 import { CampusReport, CheckGroup, openCampusWindow, readCampusCourses, runCampusCheck, runCampusUpload } from "./lib/campus";
 import { currentSemester, planCourseSync, SyncAction } from "./lib/campusSync";
 import { hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
+import { campusStateFor, countByFilter, hasPendingGrade, heatTint, isAtRisk, matchesFilter, STUDENT_FILTER, StudentFilter, StudentStatus } from "./lib/studentList";
+
+const studentFilterOptions: { key: StudentFilter; label: string }[] = [
+  { key: STUDENT_FILTER.ALL, label: "Todos" },
+  { key: STUDENT_FILTER.RISK, label: "En riesgo" },
+  { key: STUDENT_FILTER.PENDING, label: "Con pendientes" },
+  { key: STUDENT_FILTER.CAMPUS, label: "Sin subir al Campus" },
+];
+
+const campusStateLabels = { uploaded: "✓ Subida", missing: "Falta", different: "Distinta" } as const;
 
 const emptyStudent: StudentDraft = {
   fullName: "",
@@ -141,6 +152,9 @@ function App() {
   const [groupGradeItemId, setGroupGradeItemId] = useState<string | null>(null);
   const [groupGradeValue, setGroupGradeValue] = useState("");
   const [groupGradeError, setGroupGradeError] = useState("");
+  const [studentFilter, setStudentFilter] = useState<StudentFilter>(STUDENT_FILTER.ALL);
+  // Result of the last "Verificar Campus" run in this session; null until one finishes.
+  const [campusCheckResult, setCampusCheckResult] = useState<CheckGroup[] | null>(null);
 
   useEffect(() => {
     initDatabase()
@@ -510,6 +524,18 @@ function App() {
     const matchesSearch = !query || [studentItem.fullName, studentItem.code, studentItem.institutionalEmail].some((value) => value.toLowerCase().includes(query));
     return matchesSearch;
   });
+  const activeItemIds = gradeItems.map((item) => item.id);
+  const statusFor = (studentItem: Student): StudentStatus => ({
+    periodGrade: periodCalculation(studentItem.id).periodGrade,
+    hasPending: hasPendingGrade(grades, studentItem.id, activeItemIds),
+    campus: selectedCourse && activePeriod ? campusStateFor(campusCheckResult, selectedCourse.id, activePeriod.number, studentItem.code) : null,
+  });
+  const studentStatuses = new Map(filteredStudents.map((studentItem) => [studentItem.id, statusFor(studentItem)]));
+  const filterCounts = countByFilter([...studentStatuses.values()]);
+  const visibleStudents = filteredStudents.filter((studentItem) => matchesFilter(studentFilter, studentStatuses.get(studentItem.id)!));
+  const sidebarSemester = currentSemester();
+  const sidebarCourses = courses.filter((course) => course.semester === sidebarSemester || course.id === selectedCourse?.id);
+  const courseSubtitle = selectedCourse ? [...(selectedCourse.campusGroups ?? []).map((group) => [group.group, group.room].filter(Boolean).join(" · ")), `Actividades ${activePeriod?.activityPercent ?? 40}% · ${examLabel} ${activePeriod?.examPercent ?? 60}%`].filter(Boolean).join(" · ") : "";
 
   function gradeFor(studentId: string, itemId: string) {
     return grades.find((grade) => grade.studentId === studentId && grade.itemId === itemId);
@@ -620,7 +646,9 @@ function App() {
   async function runCheck() {
     setCheckError(""); setCampusStatus(""); setCheckState("checking");
     try {
-      setCheckGroups(await runCampusCheck(setCampusStatus));
+      const result = await runCampusCheck(setCampusStatus);
+      setCheckGroups(result);
+      setCampusCheckResult(result);
       setCheckState("done");
     } catch (cause) {
       setCheckError(cause instanceof Error ? cause.message : String(cause));
@@ -957,7 +985,49 @@ function App() {
   }
 
   return (
-    <AppShell header={{ height: 48 }} padding="md">
+    <AppShell header={selectedCourse ? undefined : { height: 48 }} navbar={selectedCourse ? { width: 260, breakpoint: "xs" } : undefined} padding="md">
+      {selectedCourse ? (
+        <AppShell.Navbar className="course-sidebar" aria-label="Panel del curso">
+          <img className="brand-logo" src="/branding/notazod-logo.png" alt="NOTAZOD" />
+          <button type="button" className="sidebar-back" onClick={() => { setSelectedCourse(null); setGroups([]); setMemberships([]); setViewMode("list"); }}>← Volver a cursos</button>
+          <div>
+            <p className="sidebar-label">Cursos {sidebarSemester}</p>
+            <nav className="sidebar-courses" aria-label="Cursos">
+              {sidebarCourses.map((course) => (
+                <button key={course.id} type="button" className="sidebar-course" aria-current={course.id === selectedCourse.id ? "page" : undefined} onClick={() => void openCourse(course)}>
+                  <span>{course.name}</span><small>{course.students}</small>
+                </button>
+              ))}
+            </nav>
+          </div>
+          <div>
+            <p className="sidebar-label">Mostrar</p>
+            <div className="sidebar-filters" role="group" aria-label="Filtrar estudiantes">
+              {studentFilterOptions.map((option) => {
+                const unavailable = option.key === STUDENT_FILTER.CAMPUS && !campusCheckResult;
+                return (
+                  <button key={option.key} type="button" className="sidebar-filter" data-filter={option.key} aria-pressed={studentFilter === option.key} disabled={unavailable} onClick={() => setStudentFilter(option.key)}>
+                    <span>{option.label}</span><b>{unavailable ? "" : filterCounts[option.key]}</b>
+                  </button>
+                );
+              })}
+            </div>
+            {!campusCheckResult ? <Text size="xs" c="dimmed" mt={4}>Ejecutá "Verificar Campus" para ver qué notas faltan por subir.</Text> : null}
+          </div>
+          <div className="sidebar-actions">
+            <p className="sidebar-label">Campus y datos</p>
+            <button type="button" className="accent" onClick={() => setCourseModal(true)}>+ Crear curso</button>
+            <button type="button" onClick={openCourseSync}>Sincronizar cursos</button>
+            <button type="button" onClick={openCampusCheck}>Verificar Campus</button>
+            <button type="button" onClick={() => void openCampusWindow()} aria-label="Abrir el Campus de Unimayor en una ventana de NOTAZOD">Abrir Campus</button>
+            <button type="button" onClick={() => void handleExportBackup()} aria-label="Exportar copia de seguridad de NOTAZOD">Exportar copia de seguridad</button>
+            <button type="button" onClick={() => void handleRestoreBackup()} aria-label="Restaurar copia de seguridad de NOTAZOD">Restaurar copia de seguridad</button>
+            <button type="button" onClick={() => void checkForUpdates()} aria-label="Buscar actualizaciones de NOTAZOD">Buscar actualizaciones</button>
+            <button type="button" onClick={() => void openUrl("https://github.com/CT-Zodiako/NOTAZOD")} aria-label="Abrir repositorio de NOTAZOD en GitHub">GitHub</button>
+            <button type="button" onClick={() => setColorScheme(colorScheme === "dark" ? "light" : "dark")} aria-label="Cambiar tema">{colorScheme === "dark" ? "Tema claro" : "Tema oscuro"}</button>
+          </div>
+        </AppShell.Navbar>
+      ) : (
       <AppShell.Header className="app-header">
         <Container size="xl" fluid className="header-inner">
           <Group gap="xs">
@@ -973,16 +1043,16 @@ function App() {
           </Group>
         </Container>
       </AppShell.Header>
+      )}
       <AppShell.Main>
         <Container size="xl" fluid>
           <Stack gap="md">
-            <Group justify="space-between" align="flex-end">
-              <div><Title order={1}>{selectedCourse ? selectedCourse.name : "Tus cursos"}</Title>{!selectedCourse ? <Text c="dimmed" mt="xs">Consultá tus grupos, horarios y estudiantes en un solo lugar.</Text> : null}</div>
-              <Group>
-                {selectedCourse ? <><Button variant="default" onClick={() => { setSelectedCourse(null); setGroups([]); setMemberships([]); setViewMode("list"); }}>Volver a cursos</Button><Button variant="subtle" color="red" onClick={() => { setDeleteCourseError(""); setDeleteCourseModal(true); }}>Eliminar curso</Button></> : null}
-                {!selectedCourse ? <><Button variant="light" color="green" onClick={openCourseSync}>Sincronizar cursos</Button><Button variant="light" color="teal" onClick={openCampusCheck}>Verificar Campus</Button><Button onClick={() => setCourseModal(true)}>Crear curso</Button></> : null}
+            {!selectedCourse ? (
+              <Group justify="space-between" align="flex-end">
+                <div><Title order={1}>Tus cursos</Title><Text c="dimmed" mt="xs">Consultá tus grupos, horarios y estudiantes en un solo lugar.</Text></div>
+                <Group><Button variant="light" color="green" onClick={openCourseSync}>Sincronizar cursos</Button><Button variant="light" color="teal" onClick={openCampusCheck}>Verificar Campus</Button><Button onClick={() => setCourseModal(true)}>Crear curso</Button></Group>
               </Group>
-            </Group>
+            ) : null}
             {error ? <Text c="red" role="alert">{error}</Text> : null}
             {backupMessage ? <Text c={backupMessage.type === "success" ? "green" : "red"} role="status">{backupMessage.text}</Text> : null}
             {restoreMessage ? <Text c={restoreMessage.type === "success" ? "green" : "red"} role="status">{restoreMessage.text}</Text> : null}
@@ -1013,8 +1083,19 @@ function App() {
               </section>
             ) : (
               <Stack gap="md">
-                <Group align="flex-end" grow><TextInput label="Buscar estudiante" placeholder="Nombre, código o correo" value={studentSearch} onChange={(event) => setStudentSearch(event.currentTarget.value)} /><Switch label="Vista" aria-label="Alternar entre vista de lista y vista de grupos" checked={viewMode === "groups"} onChange={(event) => setViewMode(event.currentTarget.checked ? "groups" : "list")} onLabel="Grupos" offLabel="Lista" size="lg" /></Group><Group justify="space-between" align="flex-end"><div /><Group><Button variant="default" disabled={activeState !== "active"} onClick={() => setActivityModal(true)}>Agregar actividad</Button><Button onClick={() => setStudentModal(true)}>Agregar estudiante</Button></Group></Group>
-                <Group justify="space-between" align="flex-end" wrap="wrap"><Group align="flex-end" wrap="wrap"><Select label="Corte" value={activePeriod?.id ?? null} data={periods.map((period) => ({ value: period.id, label: `Corte ${period.number} · ${periodState(period) === "locked" ? "Cerrado" : "Abierto"}` }))} onChange={(value) => { const index = periods.findIndex((period) => period.id === value); if (index >= 0) void selectPeriod(index); }} /><Button color="blue" variant="light" onClick={openSplitEditor} disabled={activeState === "locked"}>Actividades {activePeriod?.activityPercent ?? 40}% · {examLabel} {activePeriod?.examPercent ?? 60}%</Button><Button onClick={openRoulette} disabled={!students.length} style={{ background: "linear-gradient(90deg, #ff3b3b, #ff9500, #ffe135, #2ecc71, #3b82f6, #8b5cf6, #ec4899)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, textShadow: "0 1px 2px rgba(0,0,0,0.35)" }}>Ruleta</Button><Menu shadow="md" width={220}><Menu.Target><Button color="violet" variant="light" disabled={!students.length}>Exportar</Button></Menu.Target><Menu.Dropdown><Menu.Item onClick={() => { setExportError(""); setExportModal(true); }}>Exportar imagen</Menu.Item><Menu.Item onClick={() => { setTemplateColumns(["code", "name", "email", ...gradeItems.map((item) => item.id)]); setTemplateModal(true); }}>Exportar planilla</Menu.Item></Menu.Dropdown></Menu><Button color="green" variant="light" disabled={!students.length} onClick={openCampusUpload}>Subir al Campus</Button><Menu shadow="md" width={220}><Menu.Target><Button color="pink" variant="filled" disabled={activeState !== "active"}>Calificar</Button></Menu.Target><Menu.Dropdown>{gradeItems.map((item) => <Menu.Item key={item.id} onClick={() => openGradeWalkthrough(item)}>Calificar {item.name}</Menu.Item>)}</Menu.Dropdown></Menu></Group><Button variant={activeState === "locked" ? "light" : "default"} color={activeState === "locked" ? "green" : "orange"} onClick={() => void togglePeriodClosed()}>{activeState === "locked" ? "Reabrir corte" : "Cerrar corte"}</Button></Group>
+                <div className="course-header">
+                  <div><Title order={1}>{selectedCourse.name}</Title><Text c="dimmed" size="sm" mt={4}>{courseSubtitle}</Text></div>
+                  <Group gap="xs">
+                    <Button color="green" variant="light" disabled={!students.length} onClick={openCampusUpload}>Subir al Campus</Button>
+                    <Menu shadow="md" width={240}><Menu.Target><Button color="pink" variant="filled" disabled={activeState !== "active"}>Calificar ▾</Button></Menu.Target><Menu.Dropdown>{gradeItems.map((item) => <Menu.Item key={item.id} onClick={() => openGradeWalkthrough(item)}>Calificar {item.name}</Menu.Item>)}<Menu.Divider /><Menu.Item onClick={() => openGroupGradeModal()}>Calificar grupo</Menu.Item></Menu.Dropdown></Menu>
+                    <Menu shadow="md" width={220} position="bottom-end"><Menu.Target><Button variant="default" aria-label="Más acciones del curso">⋯</Button></Menu.Target><Menu.Dropdown><Menu.Item color="red" onClick={() => { setDeleteCourseError(""); setDeleteCourseModal(true); }}>Eliminar curso</Menu.Item></Menu.Dropdown></Menu>
+                  </Group>
+                </div>
+                <Group justify="space-between" wrap="wrap">
+                  <SegmentedControl aria-label="Cortes" value={activePeriod?.id ?? ""} data={periods.map((period) => ({ value: period.id, label: <span className={periodState(period) === "locked" ? "corte-locked" : undefined}>{`Corte ${period.number} · ${periodState(period) === "locked" ? "Cerrado" : "Abierto"}`}</span> }))} onChange={(value) => { const index = periods.findIndex((period) => period.id === value); if (index >= 0) void selectPeriod(index); }} />
+                  <SegmentedControl aria-label="Vista" value={viewMode} data={[{ value: "list", label: "Notas" }, { value: "groups", label: "Grupos" }]} onChange={(value) => setViewMode(value === "groups" ? "groups" : "list")} />
+                </Group>
+                <Group justify="space-between" align="flex-end" wrap="wrap"><Group align="flex-end" wrap="wrap" gap="xs"><TextInput aria-label="Buscar estudiante" placeholder="Nombre, código o correo" value={studentSearch} onChange={(event) => setStudentSearch(event.currentTarget.value)} w={240} /><Button color="blue" variant="light" onClick={openSplitEditor} disabled={activeState === "locked"}>Actividades {activePeriod?.activityPercent ?? 40}% · {examLabel} {activePeriod?.examPercent ?? 60}%</Button><Button variant="default" disabled={activeState !== "active"} onClick={() => setActivityModal(true)}>Agregar actividad</Button><Button variant="default" onClick={() => setStudentModal(true)}>Agregar estudiante</Button></Group><Group align="flex-end" wrap="wrap" gap="xs"><Button onClick={openRoulette} disabled={!students.length} style={{ background: "linear-gradient(90deg, #ff3b3b, #ff9500, #ffe135, #2ecc71, #3b82f6, #8b5cf6, #ec4899)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, textShadow: "0 1px 2px rgba(0,0,0,0.35)" }}>Ruleta</Button><Menu shadow="md" width={220}><Menu.Target><Button color="violet" variant="light" disabled={!students.length}>Exportar</Button></Menu.Target><Menu.Dropdown><Menu.Item onClick={() => { setExportError(""); setExportModal(true); }}>Exportar imagen</Menu.Item><Menu.Item onClick={() => { setTemplateColumns(["code", "name", "email", ...gradeItems.map((item) => item.id)]); setTemplateModal(true); }}>Exportar planilla</Menu.Item></Menu.Dropdown></Menu><Button variant={activeState === "locked" ? "light" : "default"} color={activeState === "locked" ? "green" : "orange"} onClick={() => void togglePeriodClosed()}>{activeState === "locked" ? "Reabrir corte" : "Cerrar corte"}</Button></Group></Group>
                 {viewMode === "groups" ? (() => {
                   const unassignedStudents = filteredStudents.filter((studentItem) => !groupForStudent(studentItem.id));
                   const renderUnassignedMember = (studentItem: Student) => (
@@ -1051,6 +1132,7 @@ function App() {
                         <TextInput label="Nombre del grupo" placeholder="Ej. Grupo 1 (vacío = automático)" value={newGroupName} onChange={(event) => setNewGroupName(event.currentTarget.value)} disabled={activeState === "locked"} />
                         <Button onClick={() => void handleCreateGroup()} disabled={activeState === "locked"}>Crear grupo</Button>
                         <Button variant="light" onClick={openCopyGroupsModal} disabled={activeState === "locked" || periods.filter((period) => period.id !== activePeriod?.id).length === 0}>Copiar grupos</Button>
+                        <Button variant="default" onClick={() => setGroupManageModal(true)} disabled={!groups.length}>Renombrar o eliminar grupos</Button>
                       </Group>
                       <SimpleGrid cols={{ base: 1, md: 2, lg: 3 }}>
                         {groups.map((group) => {
@@ -1091,7 +1173,36 @@ function App() {
                       </div>
                     </Group>
                   );
-                })() : filteredStudents.length ? <Table.ScrollContainer minWidth={760}><Table className="grade-table" striped highlightOnHover withTableBorder><Table.Thead><Table.Tr><Table.Th>#</Table.Th><Table.Th>Nombre completo</Table.Th><Table.Th>Código</Table.Th><Table.Th>Correo institucional</Table.Th>{gradeItems.map((item) => <Table.Th key={item.id} className="editable-header" onClick={() => openRenameActivity(item)} title="Editar nombre">{item.name}</Table.Th>)}<Table.Th>Nota del corte</Table.Th><Table.Th>Acumulada</Table.Th>{activePeriod?.number === 3 ? <Table.Th>Nota final</Table.Th> : null}<Table.Th>Estado</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{filteredStudents.map((item, studentIndex) => <Table.Tr key={item.id}><Table.Td>{studentIndex + 1}</Table.Td><Table.Td className="student-name-cell" onClick={() => openStudentDetail(item)} title="Ver información y notas">{item.fullName}</Table.Td><Table.Td>{item.code}</Table.Td><Table.Td>{item.institutionalEmail}</Table.Td>{gradeItems.map((gradeItem) => { const grade = gradeFor(item.id, gradeItem.id); return <Table.Td key={gradeItem.id} className="grade-cell" onClick={() => openGradeWalkthrough(gradeItem, students.findIndex((studentItem) => studentItem.id === item.id))} title={activeState === "active" ? "Editar nota" : "Corte cerrado"}>{grade ? <Badge color={grade.pending ? "yellow" : grade.value < 3 ? "red" : "green"} variant="light">{grade.pending ? "Pendiente 0,0" : grade.value.toFixed(1).replace(".", ",")}</Badge> : <Text c="dimmed">—</Text>}</Table.Td>; })}{(() => { const calculation = periodCalculation(item.id); return <><Table.Td><Badge color={activeState === "locked" ? (calculation.periodGrade < 3 ? "red" : "green") : "gray"} variant="light">{`${calculation.periodGrade.toFixed(1).replace(".", ",")}${activeState === "active" ? " · editable" : ""}`}</Badge></Table.Td></>; })()}{(() => { const summary = courseCalculation(item.id); return <><Table.Td>{summary.accumulated === null ? <Text c="dimmed">—</Text> : summary.accumulated.toFixed(1).replace(".", ",")}</Table.Td>{activePeriod?.number === 3 ? <Table.Td>{summary.final === null ? <Text c="dimmed">En curso</Text> : <Badge color={summary.final < 3 ? "red" : "green"}>{summary.final.toFixed(1).replace(".", ",")}</Badge>}</Table.Td> : null}</>; })()}<Table.Td>{gradeItems.some((gradeItem) => gradeFor(item.id, gradeItem.id)?.pending) ? <Badge color="yellow">Pendiente</Badge> : <Text c="dimmed">Sin pendientes</Text>}</Table.Td></Table.Tr>)}</Table.Tbody></Table></Table.ScrollContainer> : <Card withBorder><Text c="dimmed">Este curso todavía no tiene estudiantes.</Text></Card>}
+                })() : visibleStudents.length ? (
+                  <div>
+                    <Table.ScrollContainer minWidth={760}>
+                      <Table className="grade-table heat-table" highlightOnHover withTableBorder>
+                        <Table.Thead><Table.Tr><Table.Th>#</Table.Th><Table.Th>Estudiante</Table.Th>{gradeItems.map((item) => <Table.Th key={item.id} className="editable-header heat-header" onClick={() => openRenameActivity(item)} title="Editar nombre">{item.name} ✎</Table.Th>)}<Table.Th className="heat-header">Nota del corte</Table.Th><Table.Th className="heat-header">Acumulada</Table.Th>{activePeriod?.number === 3 ? <Table.Th className="heat-header">Nota final</Table.Th> : null}<Table.Th className="heat-header">Campus</Table.Th></Table.Tr></Table.Thead>
+                        <Table.Tbody>{visibleStudents.map((item, studentIndex) => {
+                          const status = studentStatuses.get(item.id)!;
+                          const summary = courseCalculation(item.id);
+                          return (
+                            <Table.Tr key={item.id}>
+                              <Table.Td>{studentIndex + 1}</Table.Td>
+                              <Table.Td className="student-name-cell" onClick={() => openStudentDetail(item)} title="Ver información y notas"><b>{item.fullName}</b><small>{item.code} · {item.institutionalEmail}</small></Table.Td>
+                              {gradeItems.map((gradeItem) => {
+                                const grade = gradeFor(item.id, gradeItem.id);
+                                const tint = heatTint(grade);
+                                const tintStyle = tint.kind === "graded" ? { "--heat-color": `var(${tint.token})`, "--heat-percent": `${tint.percent}%` } as CSSProperties : undefined;
+                                return <Table.Td key={gradeItem.id} className={`grade-cell heat-cell heat-${tint.kind}`} style={tintStyle} onClick={() => openGradeWalkthrough(gradeItem, students.findIndex((studentItem) => studentItem.id === item.id))} title={activeState === "active" ? "Editar nota" : "Corte cerrado"}>{tint.kind === "graded" && grade ? grade.value.toFixed(1).replace(".", ",") : tint.kind === "pending" ? "Pend." : "—"}</Table.Td>;
+                              })}
+                              <Table.Td className={`period-grade-cell ${isAtRisk(status.periodGrade) ? "is-failing" : "is-passing"}`} title={activeState === "active" ? "Corte abierto: la nota puede cambiar" : "Corte cerrado"}>{status.periodGrade.toFixed(1).replace(".", ",")}</Table.Td>
+                              <Table.Td className="summary-cell">{summary.accumulated === null ? <Text c="dimmed" span>—</Text> : summary.accumulated.toFixed(1).replace(".", ",")}</Table.Td>
+                              {activePeriod?.number === 3 ? <Table.Td className="summary-cell">{summary.final === null ? <Text c="dimmed" span>En curso</Text> : <Badge color={summary.final < 3 ? "red" : "green"}>{summary.final.toFixed(1).replace(".", ",")}</Badge>}</Table.Td> : null}
+                              <Table.Td className="summary-cell">{status.campus ? <span className={`campus-state campus-${status.campus}`}>{campusStateLabels[status.campus]}</span> : <Text c="dimmed" span>—</Text>}</Table.Td>
+                            </Table.Tr>
+                          );
+                        })}</Table.Tbody>
+                      </Table>
+                    </Table.ScrollContainer>
+                    <p className="heat-legend">0,0 <span aria-hidden="true" /> 5,0 · el color se intensifica cuanto más lejos está la nota de 3,0 · rayado = pendiente</p>
+                  </div>
+                ) : <Card withBorder><Text c="dimmed">{students.length ? "Ningún estudiante coincide con la búsqueda o el filtro." : "Este curso todavía no tiene estudiantes."}</Text></Card>}
               </Stack>
             )}
           </Stack>
