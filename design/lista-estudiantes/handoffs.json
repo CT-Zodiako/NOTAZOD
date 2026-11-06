@@ -5,10 +5,10 @@
     "03-panel-mapa-calor.html": {
       "status": "in_progress",
       "queued": false,
-      "sentAt": "2026-11-06T22:53:10.360Z",
-      "startedAt": "2026-11-06T22:53:29.191Z",
+      "sentAt": "2026-11-06T23:17:12.584Z",
+      "startedAt": "2026-11-06T23:17:29.342Z",
       "implementedAt": null,
-      "note": "Starting on branch feature/student-list-redesign in NOTAZOD Test."
+      "note": "Applying the latest artboard changes: sidebar icons + theme switch, compact 2x2 filters, per-course color (new courses.color column)."
     }
   }
 }

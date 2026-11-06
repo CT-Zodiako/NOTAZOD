@@ -10,15 +10,26 @@ Branch `feature/student-list-redesign`. Built and tried in NOTAZOD Test only.
 - S5: A "Campus" column shows per student, for the active corte, "✓ Subida" (green), "Falta" (red) or "Distinta" (warning) from the last Verificar Campus run; "—" when there is no result for that student and corte.
 - S6: A "Notas / Grupos" switch next to the corte tabs: "Notas" shows the grade table; "Grupos" shows the existing student groups UI for the active corte.
 - S7: The home screen (no course selected) keeps working: course list, Crear curso, Sincronizar cursos, Verificar Campus.
+- S8: Canvas comment: "tennis inches imagines para esto  el tema scuoen un switch algo asi ?". Every sidebar global action shows an outline icon (Crear curso +, Sincronizar cursos rotating arrows, Verificar Campus checkbox, Abrir Campus external arrow, Exportar copia down-to-tray, Restaurar copia up-from-tray, Buscar actualizaciones clock); the theme toggle is a switch with a sun/moon knob and the label "Tema oscuro" / "Tema claro".
+- S9: Canvas comment: "que consuma menos espacio". The sidebar filters are a 2x2 grid of compact tiles: the count on top in the filter's color, a short label below ("Todos", "En riesgo", "Pendientes", "Sin subir"), the full meaning as a tooltip; the selected tile has its color border and a soft tint.
+- S10: Canvas comment: "podiramo darle un color para diferencias seleccionar le color ?". Each course has a color shown as a dot before its name in the sidebar and in the course title; clicking the dot opens a palette of 6 colors (Vino, Azul acero, Dorado, Violeta, Verde, Naranja = tokens primary, grade-locked, border-focus, grade-pending, grade-passing, feedback-warning); the selected course row uses a left bar and a soft tint of its color. The choice is saved per course and survives restarts.
+- S11: The course color is stored as a palette key, validated against the 6 allowed keys (anything else is rejected and leaves the stored data unchanged); existing courses without a color show the default (Vino). The schema change is additive (new nullable column) and must not alter any existing course, student or grade data.
 
 ## Tasks
-- T1 (S2, S4, S5) Pure helpers with tests: heat tint for a grade, student status (risk/pending/ok) and filter predicates, Campus state lookup from CheckGroup results. Route: worker. Commit: pending
-- T2 (S1, S3, S6, S7) Restructure the course view and sidebar in App.tsx/App.css with Mantine components and tokens, keeping every action of S3. Route: worker. Commit: pending
-- T3 (S4, S5) Wire the last Verificar Campus result into the filter and the Campus column. Route: worker. Commit: pending
+- T1 (S2, S4, S5) Pure helpers with tests: heat tint for a grade, student status (risk/pending/ok) and filter predicates, Campus state lookup from CheckGroup results. Route: worker. Commit: db3c765
+- T2 (S1, S3, S6, S7) Restructure the course view and sidebar in App.tsx/App.css with Mantine components and tokens, keeping every action of S3. Route: worker. Commit: db3c765
+- T3 (S4, S5) Wire the last Verificar Campus result into the filter and the Campus column. Route: worker. Commit: db3c765
 - T4 Build and install NOTAZOD Test, report the design handoff. Route: inline. Commit: n/a
+- T5 (S10, S11) courses.color migration + setCourseColor/listCourses color with validation, tested through db.ts with the existing temp-SQLite harness. Route: worker. Risk: item 1 (schema change). Commit: pending
+- T6 (S8, S9, S10) Sidebar icons, theme switch, compact filter tiles, course color dot + palette + selected tint in App.tsx/App.css. Route: worker. Commit: pending
+- T7 Independent verify (risk item 1), build/install NOTAZOD Test, report handoff. Route: verify + inline. Commit: n/a
 
 ## Log
 - L1: "puede con gente sheel damme un diseno apra donde esnta al sita de lo studintes y algo de colores tambien"
 - L2: Design `design/lista-estudiantes/` with artboards 01-planilla-color, 02-semaforo-filas, 03-panel-mapa-calor. Canvas comment 84sfnnpc on 03: "perdmeos funcainladiades ?"; 03 was updated to show every existing action and resolved.
 - L3: User handed off 03 to implement ("Implement the design artboard design/lista-estudiantes/03-panel-mapa-calor.html"). 03 is the chosen artboard; 01 and 02 are alternatives.
 - L4: Prior uncommitted work (Verificar Campus + exam column label) committed apart as 7a63ec5 on this branch before the redesign.
+- L5: Worker evidence: RED (ERR_MODULE_NOT_FOUND for studentList.ts) then GREEN 10/10; suite 75/75; tsc clean; build:staging ok. Parent re-ran tsc and tests (75/75). Confirmed groupManageModal had no opener before (0 matches in 7a63ec5), so the new "Renombrar o eliminar grupos" button restores S3. Judgment calls: Estado/Código/Correo columns folded into the name cell and stripes; history/undo stay in the grade walkthrough; global actions live in the sidebar inside a course. Committed db3c765.
+- L6: Slice boundary: 7a63ec5 + db3c765 reach ~1000 authored lines on the branch (including the three design artboards); no further commits planned for this feature beyond doc updates.
+- L7: Canvas comments on 03 applied to the artboard and resolved: jzrv5c7v "tennis inches imagines para esto  el tema scuoen un switch algo asi ?", su70ww2u "que consuma menos espacio", pt29ehoh "podiramo darle un color para diferencias seleccionar le color ?". User handed off 03 again to implement these (S8-S11).
+

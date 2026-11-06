@@ -11,6 +11,39 @@
       "status": "resolved",
       "sentAt": "2026-11-06T22:51:44.975Z",
       "resolvedAt": "2026-11-06T22:52:29.935Z"
+    },
+    {
+      "id": "jzrv5c7v",
+      "file": "03-panel-mapa-calor.html",
+      "selector": "body > aside > div:nth-of-type(3)",
+      "excerpt": "CAMPUS Y DATOS + Crear curso Sincronizar cursos Verificar Campus Abrir Campus Exportar copia de seguridad Restaurar copia de seguridad Buscar actualizaciones Tema claro / oscuro",
+      "comment": "tennis inches imagines para esto  el tema scuoen un switch algo asi ?",
+      "createdAt": "2026-11-06T23:13:38.041Z",
+      "status": "resolved",
+      "sentAt": "2026-11-06T23:13:38.056Z",
+      "resolvedAt": "2026-11-06T23:13:59.095Z"
+    },
+    {
+      "id": "su70ww2u",
+      "file": "03-panel-mapa-calor.html",
+      "selector": "body > aside > div:nth-of-type(2)",
+      "excerpt": "MOSTRAR Todos 13 En riesgo 6 Con pendientes 3 Sin subir al Campus 3",
+      "comment": "que consuma menos espacio",
+      "createdAt": "2026-11-06T23:15:21.577Z",
+      "status": "resolved",
+      "sentAt": "2026-11-06T23:15:21.591Z",
+      "resolvedAt": "2026-11-06T23:15:35.943Z"
+    },
+    {
+      "id": "pt29ehoh",
+      "file": "03-panel-mapa-calor.html",
+      "selector": "body > aside > div:nth-of-type(1)",
+      "excerpt": "CURSOS 2026-2 Fundamentos de programación 13 Programación orientada a objetos I 27 Aplicaciones web II 17 Bases de datos 22",
+      "comment": "podiramo darle un color para diferencias seleccionar le color ?",
+      "createdAt": "2026-11-06T23:15:39.590Z",
+      "status": "resolved",
+      "sentAt": "2026-11-06T23:15:39.600Z",
+      "resolvedAt": "2026-11-06T23:16:09.101Z"
     }
   ]
 }
