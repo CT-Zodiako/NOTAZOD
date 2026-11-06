@@ -37,8 +37,8 @@ function countIn(codes: string[], course: CourseCodes) {
   return codes.filter((code) => course.codes.has(code)).length;
 }
 
-// A Campus group is verified only when every one of its student codes belongs to exactly one NOTAZOD course.
-export function verifyGroup(group: CampusGroupInput, courses: CourseCodes[]): Verification {
+// A Campus group matches when every one of its student codes belongs to exactly one NOTAZOD course.
+export function matchGroup(group: { name: string; codes: string[] }, courses: CourseCodes[]): Verification {
   const touched = courses.filter((course) => group.codes.some((code) => course.codes.has(code)));
   if (!touched.length) return { status: "unmatched" };
   const complete = touched.filter((candidate) => group.codes.every((code) => candidate.codes.has(code)));
@@ -47,8 +47,27 @@ export function verifyGroup(group: CampusGroupInput, courses: CourseCodes[]): Ve
   const missingCodes = group.codes.filter((code) => !course.codes.has(code));
   const notInCampus = [...course.codes].filter((code) => !group.codes.includes(code));
   if (missingCodes.length) return { status: "failed", courseId: course.id, missingCodes, notInCampus, reason: "student codes not found in one NOTAZOD course" };
-  if (group.openColumn == null) return { status: "failed", courseId: course.id, missingCodes, notInCampus, reason: "no single open period column in the Campus form" };
   return { status: "verified", courseId: course.id, missingCodes, notInCampus };
+}
+
+// For an upload the group must also have a single open period column to write into.
+export function verifyGroup(group: CampusGroupInput, courses: CourseCodes[]): Verification {
+  const result = matchGroup(group, courses);
+  if (result.status !== "verified" || group.openColumn != null) return result;
+  return { ...result, status: "failed", reason: "no single open period column in the Campus form" };
+}
+
+export type UploadCheck = "uploaded" | "different" | "missing";
+
+// Compares a Campus cell with the NOTAZOD grade as displayed (one decimal). An empty cell, or 0,0
+// while NOTAZOD has a grade, means the grade was never uploaded.
+export function checkUploaded(campus: string, notazod: number): UploadCheck {
+  const text = campus.trim();
+  if (!text) return "missing";
+  const value = Number(text.replace(",", "."));
+  if (Number.isNaN(value)) return "different";
+  if (formatGrade(value) === formatGrade(notazod)) return "uploaded";
+  return value === 0 ? "missing" : "different";
 }
 
 // Keeps the groups of one NOTAZOD course, plus ambiguous groups that could belong to it.
@@ -84,5 +103,11 @@ export function buildCampusData(rows: CampusDataRows) {
     const byItem = new Map(rows.grades.filter((g) => g.studentId === student.id).map((g) => [g.itemId, g]));
     return periodGrade(period, periodItems, byItem);
   };
-  return { courses, gradeFor, periodInfo };
+  const periodHasGrades = (courseId: string, periodNumber: number) => {
+    const period = periodInfo(courseId, periodNumber);
+    if (!period) return false;
+    const itemIds = new Set(rows.items.filter((item) => item.periodId === period.id).map((item) => item.id));
+    return rows.grades.some((grade) => itemIds.has(grade.itemId));
+  };
+  return { courses, gradeFor, periodInfo, periodHasGrades };
 }

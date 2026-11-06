@@ -26,7 +26,7 @@ import {
   useMantineColorScheme,
 } from "@mantine/core";
 import { assignStudentToGroup, copyGroupsFromPeriod, Course, createCourse, createGradeItem, createGroup, createStudent, deleteCourse, deleteGrade, applyCourseSync, deleteGradeItem, deleteGroup, exportBackup, loadSyncCourses, SyncResult, Grade, GradeHistoryEntry, GradeItem, Group as StudentGroup, GroupMembership, initDatabase, listCourses, listGradeHistory, listGradeItems, listGrades, listGroupMemberships, listGroups, listPeriods, listStudents, Period, renameGradeItem, renameGroup, saveGrade, saveGroupGrade, setPeriodClosed, stageRestore, Student, undoLastGrade, updatePeriod } from "./lib/db";
-import { CampusReport, openCampusWindow, readCampusCourses, runCampusUpload } from "./lib/campus";
+import { CampusReport, CheckGroup, openCampusWindow, readCampusCourses, runCampusCheck, runCampusUpload } from "./lib/campus";
 import { currentSemester, planCourseSync, SyncAction } from "./lib/campusSync";
 import { hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
 
@@ -77,6 +77,10 @@ function App() {
   const [campusError, setCampusError] = useState("");
   const [campusStatus, setCampusStatus] = useState("");
   const [syncModal, setSyncModal] = useState(false);
+  const [checkModal, setCheckModal] = useState(false);
+  const [checkState, setCheckState] = useState<"idle" | "checking" | "done" | "error">("idle");
+  const [checkGroups, setCheckGroups] = useState<CheckGroup[]>([]);
+  const [checkError, setCheckError] = useState("");
   const [syncState, setSyncState] = useState<"idle" | "reading" | "preview" | "applying" | "done" | "error">("idle");
   const [syncPlan, setSyncPlan] = useState<SyncAction[]>([]);
   const [syncResults, setSyncResults] = useState<SyncResult[]>([]);
@@ -497,6 +501,7 @@ function App() {
 
   const activePeriod = periods[periodIndex];
   const activeState = activePeriod ? periodState(activePeriod) : "active";
+  const examLabel = gradeItems.find((item) => item.isExam)?.name ?? "Parcial";
   const exportColumnOptions = [{ key: "code", label: "Código" }, { key: "name", label: "Nombre" }, ...gradeItems.map((item) => ({ key: String(item.id), label: String(item.name ?? item.id) })), { key: "periodGrade", label: "Nota del corte" }, { key: "accumulated", label: "Acumulada" }, { key: "final", label: "Nota final" }];
   const hasExportSelection = exportColumnOptions.some((column) => exportColumns.includes(column.key));
   const renameItemGradeCount = renameItem ? grades.filter((grade) => grade.itemId === renameItem.id).length : 0;
@@ -605,6 +610,21 @@ function App() {
       setRenameModal(false); setRenameItem(null); setDeleteActivityConfirm(false);
     } catch (error) {
       setDeleteActivityError(`No se pudo eliminar la actividad. No se borró ningún dato. Detalle: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  function openCampusCheck() {
+    setCheckGroups([]); setCheckError(""); setCampusStatus(""); setCheckState("idle"); setCheckModal(true);
+  }
+
+  async function runCheck() {
+    setCheckError(""); setCampusStatus(""); setCheckState("checking");
+    try {
+      setCheckGroups(await runCampusCheck(setCampusStatus));
+      setCheckState("done");
+    } catch (cause) {
+      setCheckError(cause instanceof Error ? cause.message : String(cause));
+      setCheckState("error");
     }
   }
 
@@ -960,7 +980,7 @@ function App() {
               <div><Title order={1}>{selectedCourse ? selectedCourse.name : "Tus cursos"}</Title>{!selectedCourse ? <Text c="dimmed" mt="xs">Consultá tus grupos, horarios y estudiantes en un solo lugar.</Text> : null}</div>
               <Group>
                 {selectedCourse ? <><Button variant="default" onClick={() => { setSelectedCourse(null); setGroups([]); setMemberships([]); setViewMode("list"); }}>Volver a cursos</Button><Button variant="subtle" color="red" onClick={() => { setDeleteCourseError(""); setDeleteCourseModal(true); }}>Eliminar curso</Button></> : null}
-                {!selectedCourse ? <><Button variant="light" color="green" onClick={openCourseSync}>Sincronizar cursos</Button><Button onClick={() => setCourseModal(true)}>Crear curso</Button></> : null}
+                {!selectedCourse ? <><Button variant="light" color="green" onClick={openCourseSync}>Sincronizar cursos</Button><Button variant="light" color="teal" onClick={openCampusCheck}>Verificar Campus</Button><Button onClick={() => setCourseModal(true)}>Crear curso</Button></> : null}
               </Group>
             </Group>
             {error ? <Text c="red" role="alert">{error}</Text> : null}
@@ -994,7 +1014,7 @@ function App() {
             ) : (
               <Stack gap="md">
                 <Group align="flex-end" grow><TextInput label="Buscar estudiante" placeholder="Nombre, código o correo" value={studentSearch} onChange={(event) => setStudentSearch(event.currentTarget.value)} /><Switch label="Vista" aria-label="Alternar entre vista de lista y vista de grupos" checked={viewMode === "groups"} onChange={(event) => setViewMode(event.currentTarget.checked ? "groups" : "list")} onLabel="Grupos" offLabel="Lista" size="lg" /></Group><Group justify="space-between" align="flex-end"><div /><Group><Button variant="default" disabled={activeState !== "active"} onClick={() => setActivityModal(true)}>Agregar actividad</Button><Button onClick={() => setStudentModal(true)}>Agregar estudiante</Button></Group></Group>
-                <Group justify="space-between" align="flex-end" wrap="wrap"><Group align="flex-end" wrap="wrap"><Select label="Corte" value={activePeriod?.id ?? null} data={periods.map((period) => ({ value: period.id, label: `Corte ${period.number} · ${periodState(period) === "locked" ? "Cerrado" : "Abierto"}` }))} onChange={(value) => { const index = periods.findIndex((period) => period.id === value); if (index >= 0) void selectPeriod(index); }} /><Button color="blue" variant="light" onClick={openSplitEditor} disabled={activeState === "locked"}>Actividades {activePeriod?.activityPercent ?? 40}% · Parcial {activePeriod?.examPercent ?? 60}%</Button><Button onClick={openRoulette} disabled={!students.length} style={{ background: "linear-gradient(90deg, #ff3b3b, #ff9500, #ffe135, #2ecc71, #3b82f6, #8b5cf6, #ec4899)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, textShadow: "0 1px 2px rgba(0,0,0,0.35)" }}>Ruleta</Button><Menu shadow="md" width={220}><Menu.Target><Button color="violet" variant="light" disabled={!students.length}>Exportar</Button></Menu.Target><Menu.Dropdown><Menu.Item onClick={() => { setExportError(""); setExportModal(true); }}>Exportar imagen</Menu.Item><Menu.Item onClick={() => { setTemplateColumns(["code", "name", "email", ...gradeItems.map((item) => item.id)]); setTemplateModal(true); }}>Exportar planilla</Menu.Item></Menu.Dropdown></Menu><Button color="green" variant="light" disabled={!students.length} onClick={openCampusUpload}>Subir al Campus</Button><Menu shadow="md" width={220}><Menu.Target><Button color="pink" variant="filled" disabled={activeState !== "active"}>Calificar</Button></Menu.Target><Menu.Dropdown>{gradeItems.map((item) => <Menu.Item key={item.id} onClick={() => openGradeWalkthrough(item)}>Calificar {item.name}</Menu.Item>)}</Menu.Dropdown></Menu></Group><Button variant={activeState === "locked" ? "light" : "default"} color={activeState === "locked" ? "green" : "orange"} onClick={() => void togglePeriodClosed()}>{activeState === "locked" ? "Reabrir corte" : "Cerrar corte"}</Button></Group>
+                <Group justify="space-between" align="flex-end" wrap="wrap"><Group align="flex-end" wrap="wrap"><Select label="Corte" value={activePeriod?.id ?? null} data={periods.map((period) => ({ value: period.id, label: `Corte ${period.number} · ${periodState(period) === "locked" ? "Cerrado" : "Abierto"}` }))} onChange={(value) => { const index = periods.findIndex((period) => period.id === value); if (index >= 0) void selectPeriod(index); }} /><Button color="blue" variant="light" onClick={openSplitEditor} disabled={activeState === "locked"}>Actividades {activePeriod?.activityPercent ?? 40}% · {examLabel} {activePeriod?.examPercent ?? 60}%</Button><Button onClick={openRoulette} disabled={!students.length} style={{ background: "linear-gradient(90deg, #ff3b3b, #ff9500, #ffe135, #2ecc71, #3b82f6, #8b5cf6, #ec4899)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, textShadow: "0 1px 2px rgba(0,0,0,0.35)" }}>Ruleta</Button><Menu shadow="md" width={220}><Menu.Target><Button color="violet" variant="light" disabled={!students.length}>Exportar</Button></Menu.Target><Menu.Dropdown><Menu.Item onClick={() => { setExportError(""); setExportModal(true); }}>Exportar imagen</Menu.Item><Menu.Item onClick={() => { setTemplateColumns(["code", "name", "email", ...gradeItems.map((item) => item.id)]); setTemplateModal(true); }}>Exportar planilla</Menu.Item></Menu.Dropdown></Menu><Button color="green" variant="light" disabled={!students.length} onClick={openCampusUpload}>Subir al Campus</Button><Menu shadow="md" width={220}><Menu.Target><Button color="pink" variant="filled" disabled={activeState !== "active"}>Calificar</Button></Menu.Target><Menu.Dropdown>{gradeItems.map((item) => <Menu.Item key={item.id} onClick={() => openGradeWalkthrough(item)}>Calificar {item.name}</Menu.Item>)}</Menu.Dropdown></Menu></Group><Button variant={activeState === "locked" ? "light" : "default"} color={activeState === "locked" ? "green" : "orange"} onClick={() => void togglePeriodClosed()}>{activeState === "locked" ? "Reabrir corte" : "Cerrar corte"}</Button></Group>
                 {viewMode === "groups" ? (() => {
                   const unassignedStudents = filteredStudents.filter((studentItem) => !groupForStudent(studentItem.id));
                   const renderUnassignedMember = (studentItem: Student) => (
@@ -1120,6 +1140,39 @@ function App() {
       <Modal opened={studentModal} onClose={() => setStudentModal(false)} title="Agregar estudiante" centered><Stack>{field("fullName", "Nombre completo")}{field("code", "Código")}{field("documentId", "Documento")}{field("institutionalEmail", "Correo institucional", "email")}{field("personalEmail", "Correo personal", "email")}<Group justify="flex-end"><Button variant="default" onClick={() => setStudentModal(false)}>Cancelar</Button><Button onClick={handleCreateStudent} disabled={Object.values(student).some((value) => !value.trim())}>Agregar</Button></Group></Stack></Modal>
       <Modal opened={templateModal} onClose={() => setTemplateModal(false)} title="Qué querés exportar" centered><Stack><Text size="sm" c="dimmed">Elegí las columnas de la plantilla y después el formato.</Text>{templateFieldOptions().map((column) => <Checkbox key={column.key} label={column.label} checked={templateColumns.includes(column.key)} onChange={(event) => toggleTemplateColumn(column.key, event.currentTarget.checked)} />)}<Text size="sm" c="dimmed">Formato</Text><Group><Button disabled={!templateColumns.length} onClick={() => downloadGradeTemplate("csv")}>CSV</Button><Button variant="light" disabled={!templateColumns.length} onClick={() => downloadGradeTemplate("xls")}>Excel (.xls)</Button></Group></Stack></Modal>
       <Modal opened={exportModal} onClose={() => setExportModal(false)} title={`Elegir columnas · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">Elegí qué información querés incluir en la imagen.</Text>{exportColumnOptions.map((column) => <Checkbox key={column.key} label={column.label} checked={exportColumns.includes(column.key)} onChange={(event) => { const checked = event.currentTarget.checked; setExportColumns((current) => { const safeCurrent = Array.isArray(current) ? current.filter((value): value is string => typeof value === "string") : []; return checked ? safeCurrent.includes(column.key) ? safeCurrent : [...safeCurrent, column.key] : safeCurrent.filter((key) => key !== column.key); }); }} />)}{exportError ? <Text size="sm" c="red">{exportError}</Text> : null}<Group justify="flex-end"><Button variant="default" onClick={() => setExportModal(false)}>Cancelar</Button><Button disabled={!hasExportSelection} onClick={exportPeriodImage}>Descargar imagen</Button></Group></Stack></Modal>
+      <Modal opened={checkModal} onClose={() => { if (checkState !== "checking") setCheckModal(false); }} title="Verificar notas en el Campus" centered size="xl">
+        <Stack>
+          {checkState === "idle" ? <><Text size="sm">NOTAZOD va a leer cada grupo del Campus y comparar, estudiante por estudiante, la nota de cada corte con la "Nota del corte" de NOTAZOD. Solo se revisan los cortes que tienen notas en NOTAZOD. No se escribe ni se guarda nada en el Campus.</Text><Text size="sm" c="dimmed">Si el Campus te pide iniciar sesión, hacelo en su ventana.</Text><Group justify="flex-end"><Button variant="default" onClick={() => setCheckModal(false)}>Cancelar</Button><Button color="teal" onClick={() => void runCheck()}>Verificar</Button></Group></> : null}
+          {checkState === "checking" ? <Group wrap="nowrap"><Loader size="sm" /><Stack gap={2}><Text size="sm">Leyendo el Campus...</Text>{campusStatus ? <Text size="sm" c="dimmed">{campusStatus}</Text> : null}</Stack></Group> : null}
+          {checkState === "error" ? <><Text c="red" size="sm" style={{ whiteSpace: "pre-wrap" }}>{checkError}</Text><Group justify="flex-end"><Button variant="default" onClick={() => setCheckModal(false)}>Cerrar</Button><Button onClick={() => void runCheck()}>Reintentar</Button></Group></> : null}
+          {checkState === "done" ? (() => {
+            const matched = checkGroups.filter((group) => group.status === "verified");
+            const failed = checkGroups.filter((group) => group.status === "failed");
+            const unmatched = checkGroups.length - matched.length - failed.length;
+            const byCourse = [...new Set(matched.map((group) => group.course!))].map((course) => ({ course, rows: matched.filter((group) => group.course === course).flatMap((group) => group.rows) }));
+            const pending = byCourse.reduce((sum, item) => sum + item.rows.filter((row) => row.state !== "uploaded").length, 0);
+            return <>
+              <Text fw={600} c={pending || failed.length ? "red" : "green"}>{pending || failed.length ? `Faltan ${pending} nota${pending === 1 ? "" : "s"} por subir o corregir${failed.length ? ` y ${failed.length} grupo${failed.length === 1 ? "" : "s"} no se pudo${failed.length === 1 ? "" : "ieron"} verificar` : ""}.` : "Todas las notas de NOTAZOD están subidas en el Campus."}</Text>
+              {!byCourse.length ? <Text size="sm">Ningún grupo del Campus coincide con un curso de NOTAZOD.</Text> : null}
+              {byCourse.map(({ course, rows }) => {
+                const periods = [...new Set(rows.map((row) => row.period))].sort();
+                const wrong = rows.filter((row) => row.state !== "uploaded");
+                return <Card key={course} withBorder>
+                  <Stack gap="xs">
+                    <Group justify="space-between"><Text fw={600}>{course}</Text><Badge color={wrong.length ? "red" : "green"}>{wrong.length ? `${wrong.length} pendiente${wrong.length === 1 ? "" : "s"}` : "Todo subido"}</Badge></Group>
+                    {periods.length ? <Group gap="xs">{periods.map((period) => { const inPeriod = rows.filter((row) => row.period === period); const ok = inPeriod.filter((row) => row.state === "uploaded").length; return <Badge key={period} variant="light" color={ok === inPeriod.length ? "green" : "red"}>Corte {period}: {ok}/{inPeriod.length} subidas</Badge>; })}</Group> : <Text size="sm" c="dimmed">Este curso todavía no tiene notas en NOTAZOD.</Text>}
+                    {wrong.length ? <Table striped withTableBorder><Table.Thead><Table.Tr><Table.Th>Corte</Table.Th><Table.Th>Código</Table.Th><Table.Th>Estudiante</Table.Th><Table.Th>Campus</Table.Th><Table.Th>NOTAZOD</Table.Th><Table.Th>Estado</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{wrong.map((row) => <Table.Tr key={`${row.period}-${row.code}`}><Table.Td>{row.period}</Table.Td><Table.Td>{row.code}</Table.Td><Table.Td>{row.name}</Table.Td><Table.Td>{row.campus || "—"}</Table.Td><Table.Td>{row.notazod}</Table.Td><Table.Td>{row.state === "missing" ? <Badge color="red" variant="light">Falta</Badge> : <Badge color="orange" variant="light">Distinta</Badge>}</Table.Td></Table.Tr>)}</Table.Tbody></Table> : null}
+                  </Stack>
+                </Card>;
+              })}
+              {failed.map((group) => <Text key={group.key} size="sm" c="red">No se pudo verificar {group.key}: {group.reason}{group.missingCodes?.length ? ` (${group.missingCodes.join(", ")})` : ""}</Text>)}
+              {unmatched ? <Text size="sm" c="dimmed">{unmatched} grupo{unmatched === 1 ? "" : "s"} del Campus sin curso en NOTAZOD.</Text> : null}
+              <Group justify="flex-end"><Button variant="default" onClick={() => void runCheck()}>Verificar de nuevo</Button><Button onClick={() => setCheckModal(false)}>Cerrar</Button></Group>
+            </>;
+          })() : null}
+        </Stack>
+      </Modal>
+
       <Modal opened={syncModal} onClose={() => { if (syncState !== "reading" && syncState !== "applying") setSyncModal(false); }} title="Sincronizar cursos desde el Campus" centered size="xl">
         <Stack>
           {syncState === "idle" ? <><Text size="sm">NOTAZOD va a leer cada grupo de "Información estudiantes" del Campus. Los grupos que ya tenés como curso solo suman los estudiantes que falten; los demás se crean como cursos nuevos del semestre {currentSemester()}. Los cortes ya cerrados en el Campus se importan como "Nota del Campus" solo si en NOTAZOD ese corte todavía no tiene notas. También se actualizan el programa, horario y salón de cada grupo. No se borra ninguna nota.</Text><Text size="sm" c="dimmed">Primero vas a ver una vista previa. Si el Campus te pide iniciar sesión, hacelo en su ventana.</Text><Group justify="flex-end"><Button variant="default" onClick={() => setSyncModal(false)}>Cancelar</Button><Button color="green" onClick={() => void readCourseSync()}>Leer el Campus</Button></Group></> : null}
@@ -1178,7 +1231,7 @@ function App() {
       </Modal>
       <Modal opened={renameModal} onClose={() => { setRenameModal(false); setDeleteActivityConfirm(false); setDeleteActivityError(""); }} title="Editar actividad" centered><Stack>{deleteActivityConfirm ? <><Text c="red">Vas a eliminar <b>{renameItem?.name}</b> de este corte.</Text><Text size="sm">{renameItemGradeCount ? `Se borrarán también ${renameItemGradeCount} nota${renameItemGradeCount === 1 ? "" : "s"} registrada${renameItemGradeCount === 1 ? "" : "s"} en esta actividad.` : "Esta actividad no tiene notas registradas."} Antes de eliminar se guarda una copia de seguridad interna.</Text>{deleteActivityError ? <Text c="red" size="sm" role="alert">{deleteActivityError}</Text> : null}<Group justify="flex-end"><Button variant="default" onClick={() => { setDeleteActivityConfirm(false); setDeleteActivityError(""); }}>Volver</Button><Button color="red" onClick={() => void handleDeleteActivity()}>Eliminar actividad</Button></Group></> : <><TextInput label="Nombre" value={renameName} onChange={(event) => setRenameName(event.currentTarget.value)} autoFocus /><Group justify="space-between">{renameItem && !renameItem.isExam ? <Button variant="subtle" color="red" onClick={() => setDeleteActivityConfirm(true)}>Eliminar actividad</Button> : <div />}<Group><Button variant="default" onClick={() => setRenameModal(false)}>Cancelar</Button><Button onClick={() => void handleRenameActivity()} disabled={!renameName.trim()}>Guardar</Button></Group></Group></>}</Stack></Modal>
       <Modal opened={activityModal} onClose={() => setActivityModal(false)} title={`Agregar actividad · Corte ${activePeriod?.number ?? ""}`} centered><Stack><TextInput label="Nombre de la actividad" placeholder="Ej. Taller 2" value={activityName} onChange={(event) => setActivityName(event.currentTarget.value)} autoFocus required /><Group justify="flex-end"><Button variant="default" onClick={() => setActivityModal(false)}>Cancelar</Button><Button onClick={() => void handleCreateActivity()} disabled={!activityName.trim()}>Agregar</Button></Group></Stack></Modal>
-      <Modal opened={splitModal} onClose={() => setSplitModal(false)} title={`Porcentajes · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">La suma debe ser exactamente 100%.</Text><NumberInput label="Actividades" suffix=" %" min={0} max={100} value={activityPercent} onChange={(value) => { const next = typeof value === "number" ? value : 0; setActivityPercent(next); setExamPercent(100 - next); }} /><NumberInput label="Parcial" suffix=" %" min={0} max={100} value={examPercent} onChange={(value) => { const next = typeof value === "number" ? value : 0; setExamPercent(next); setActivityPercent(100 - next); }} /><Text c={activityPercent + examPercent === 100 ? "green" : "red"}>Total: {activityPercent + examPercent}%</Text><Group justify="flex-end"><Button variant="default" onClick={() => setSplitModal(false)}>Cancelar</Button><Button onClick={() => void saveSplit()} disabled={activityPercent + examPercent !== 100}>Guardar</Button></Group></Stack></Modal>
+      <Modal opened={splitModal} onClose={() => setSplitModal(false)} title={`Porcentajes · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">La suma debe ser exactamente 100%.</Text><NumberInput label="Actividades" suffix=" %" min={0} max={100} value={activityPercent} onChange={(value) => { const next = typeof value === "number" ? value : 0; setActivityPercent(next); setExamPercent(100 - next); }} /><NumberInput label={examLabel} suffix=" %" min={0} max={100} value={examPercent} onChange={(value) => { const next = typeof value === "number" ? value : 0; setExamPercent(next); setActivityPercent(100 - next); }} /><Text c={activityPercent + examPercent === 100 ? "green" : "red"}>Total: {activityPercent + examPercent}%</Text><Group justify="flex-end"><Button variant="default" onClick={() => setSplitModal(false)}>Cancelar</Button><Button onClick={() => void saveSplit()} disabled={activityPercent + examPercent !== 100}>Guardar</Button></Group></Stack></Modal>
       <Modal opened={groupManageModal} onClose={() => { setGroupManageModal(false); setRenameGroupTarget(null); setRenameGroupName(""); }} title={`Grupos · Corte ${activePeriod?.number ?? ""}`} centered>
         <Stack>
           {activeState === "locked" ? <Text size="sm" c="dimmed">Este corte está cerrado. No se pueden crear, renombrar ni eliminar grupos.</Text> : null}

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { buildCampusData, formatGrade, planUpload, scopeToCourse, verifyGroup, type Verification } from "./campusGrades";
+import { buildCampusData, checkUploaded, formatGrade, matchGroup, planUpload, scopeToCourse, verifyGroup, type UploadCheck, type Verification } from "./campusGrades";
 import type { CampusCourseGroup } from "./campusSync";
 import { loadCampusRows } from "./db";
 import type { StudentDraft } from "./validation";
@@ -212,6 +212,47 @@ export async function runCampusUpload(courseId: string, save: boolean, onStatus:
     try { await evalInCampus(`sessionStorage.removeItem(${JSON.stringify(AUTO_KEY)}); return true;`); } catch { /* window closed */ }
   }
   return report;
+}
+
+// ---- "Verificar Campus": read-only check that every NOTAZOD period grade is in the Campus ----
+
+export type CheckRow = { code: string; name: string; period: number; campus: string; notazod: string; state: UploadCheck };
+export type CheckGroup = Verification & { key: string; course?: string; periods: number[]; rows: CheckRow[] };
+
+// Reads every Campus grading form and compares each period column that has grades in NOTAZOD.
+// Nothing is typed or saved in the Campus.
+export async function runCampusCheck(onStatus: (message: string) => void): Promise<CheckGroup[]> {
+  const data = buildCampusData(await loadCampusRows());
+  onStatus("Abriendo el Campus...");
+  await ensureLoggedIn(onStatus);
+  await openList();
+  const listed = await evalInCampus<ListedGroup[]>(LIST_GROUPS);
+  const groups: CheckGroup[] = [];
+  for (const [position, group] of listed.entries()) {
+    onStatus(`Revisando grupo ${position + 1} de ${listed.length} en el Campus...`);
+    const key = groupKey(group);
+    await openGroup(key);
+    const form = await evalInCampus<Form>(READ_FORM);
+    const entry: CheckGroup = { key, ...matchGroup({ name: key, codes: form.rows.map((row) => row.code) }, data.courses), periods: [], rows: [] };
+    if (entry.status !== "unmatched" && form.rows.length !== group.total) {
+      entry.status = "failed";
+      entry.reason = `read ${form.rows.length} students but the Campus list says ${group.total}`;
+    }
+    if (entry.status === "verified") {
+      const course = data.courses.find((c) => c.id === entry.courseId)!;
+      entry.course = course.name;
+      entry.periods = [1, 2, 3].filter((period) => data.periodHasGrades(course.id, period));
+      for (const period of entry.periods) {
+        for (const row of form.rows) {
+          const grade = data.gradeFor(course.id, period, row.code) ?? 0;
+          const campus = row.inputs[period - 1]?.value ?? "";
+          entry.rows.push({ code: row.code, name: row.name, period, campus, notazod: formatGrade(grade), state: checkUploaded(campus, grade) });
+        }
+      }
+    }
+    groups.push(entry);
+  }
+  return groups;
 }
 
 // ---- "Sincronizar cursos": read every group of "Información estudiantes" ----

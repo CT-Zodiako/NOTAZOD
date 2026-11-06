@@ -15,6 +15,16 @@ Uploads each student's NOTAZOD **Nota del corte** to the open period column (`No
 
 Grades use the formula NOTAZOD displays: activity average times the activity percentage plus the exam times the exam percentage; missing or pending grades count as 0,0. Values are written with one decimal and a comma (`4,7`). The database is only read.
 
+## Check uploaded grades
+
+**Verificar Campus** (home screen) answers "are all my grades in the Campus?" without writing anything. It reads every Campus grading form, matches each group to a NOTAZOD course by student code (no open column needed), and, for every period that has at least one grade in NOTAZOD, compares each student's Campus value with the NOTAZOD **Nota del corte**:
+
+- **Subida**: same value with one decimal (`4,7` and `4,7`).
+- **Falta**: the Campus cell is empty, or it is `0,0` while NOTAZOD has a grade.
+- **Distinta**: the Campus has another value.
+
+The result shows, per course, `Corte N: subidas/total` and the students that are missing or different. Groups that cannot be verified and Campus groups without a NOTAZOD course are listed separately.
+
 ## Sync courses
 
 **Sincronizar cursos** (home screen) reads every group of the Campus **Información estudiantes** page in the same NOTAZOD window and maps NOMBRE, CÓDIGO, DOCUMENTO, CORREO 1 and CORREO 2 to the NOTAZOD student columns. Plan de estudios and estado financiero are not stored.
@@ -29,7 +39,7 @@ Grades use the formula NOTAZOD displays: activity average times the activity per
 
 - `app/src-tauri/src/lib.rs`: `campus_open` creates the `campus` window (navigation locked to `campus2.unimayor.edu.co`, no capability, so the page cannot call the app). `campus_eval` runs a synchronous script in that window and returns its JSON result, only while it shows the Campus host.
 - `app/src-tauri/src/campus_init.js`: injected into every Campus page; answers dialogs only while an upload runs.
-- `app/src/lib/campus.ts`: the upload and sync readers. `app/src/lib/campusGrades.ts` and `app/src/lib/campusSync.ts`: pure grade, verification and sync planning logic.
+- `app/src/lib/campus.ts`: the upload, check and sync readers. `app/src/lib/campusGrades.ts` and `app/src/lib/campusSync.ts`: pure grade, verification and sync planning logic.
 
 ## Tests
 
