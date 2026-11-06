@@ -1,5 +1,6 @@
 import type { CheckGroup } from "./campus";
 import type { UploadCheck } from "./campusGrades";
+import type { CourseColor } from "./db";
 
 // Pure helpers for the course student list: heat-map tint, status filters and the Campus column.
 
@@ -70,4 +71,18 @@ export function matchesFilter(filter: StudentFilter, status: StudentStatus) {
 export function countByFilter(statuses: StudentStatus[]): Record<StudentFilter, number> {
   const count = (filter: StudentFilter) => statuses.filter((status) => matchesFilter(filter, status)).length;
   return { all: count("all"), risk: count("risk"), pending: count("pending"), campus: count("campus") };
+}
+
+// Course color palette (S10): each stored key maps to a design token, so it follows the light/dark theme.
+export const COURSE_COLOR_SWATCHES = {
+  primary: { token: "--color-action-primary", label: "Vino" },
+  locked: { token: "--color-grade-locked", label: "Azul acero" },
+  focus: { token: "--color-border-focus", label: "Dorado" },
+  pending: { token: "--color-grade-pending", label: "Violeta" },
+  passing: { token: "--color-grade-passing", label: "Verde" },
+  warning: { token: "--color-feedback-warning", label: "Naranja" },
+} as const satisfies Record<CourseColor, { token: string; label: string }>;
+
+export function courseColorStyle(color: CourseColor) {
+  return { "--course-color": `var(${COURSE_COLOR_SWATCHES[color].token})` };
 }

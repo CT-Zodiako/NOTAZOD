@@ -14,6 +14,7 @@ import {
   Menu,
   Modal,
   NumberInput,
+  Popover,
   Progress,
   SegmentedControl,
   Select,
@@ -24,20 +25,39 @@ import {
   Text,
   TextInput,
   Title,
+  Tooltip,
   useMantineColorScheme,
 } from "@mantine/core";
-import { assignStudentToGroup, copyGroupsFromPeriod, Course, createCourse, createGradeItem, createGroup, createStudent, deleteCourse, deleteGrade, applyCourseSync, deleteGradeItem, deleteGroup, exportBackup, loadSyncCourses, SyncResult, Grade, GradeHistoryEntry, GradeItem, Group as StudentGroup, GroupMembership, initDatabase, listCourses, listGradeHistory, listGradeItems, listGrades, listGroupMemberships, listGroups, listPeriods, listStudents, Period, renameGradeItem, renameGroup, saveGrade, saveGroupGrade, setPeriodClosed, stageRestore, Student, undoLastGrade, updatePeriod } from "./lib/db";
+import { assignStudentToGroup, copyGroupsFromPeriod, Course, COURSE_COLORS, CourseColor, setCourseColor, createCourse, createGradeItem, createGroup, createStudent, deleteCourse, deleteGrade, applyCourseSync, deleteGradeItem, deleteGroup, exportBackup, loadSyncCourses, SyncResult, Grade, GradeHistoryEntry, GradeItem, Group as StudentGroup, GroupMembership, initDatabase, listCourses, listGradeHistory, listGradeItems, listGrades, listGroupMemberships, listGroups, listPeriods, listStudents, Period, renameGradeItem, renameGroup, saveGrade, saveGroupGrade, setPeriodClosed, stageRestore, Student, undoLastGrade, updatePeriod } from "./lib/db";
 import { CampusReport, CheckGroup, openCampusWindow, readCampusCourses, runCampusCheck, runCampusUpload } from "./lib/campus";
 import { currentSemester, planCourseSync, SyncAction } from "./lib/campusSync";
 import { hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
-import { campusStateFor, countByFilter, hasPendingGrade, heatTint, isAtRisk, matchesFilter, STUDENT_FILTER, StudentFilter, StudentStatus } from "./lib/studentList";
+import { campusStateFor, COURSE_COLOR_SWATCHES, courseColorStyle, countByFilter, hasPendingGrade, heatTint, isAtRisk, matchesFilter, STUDENT_FILTER, StudentFilter, StudentStatus } from "./lib/studentList";
 
-const studentFilterOptions: { key: StudentFilter; label: string }[] = [
-  { key: STUDENT_FILTER.ALL, label: "Todos" },
-  { key: STUDENT_FILTER.RISK, label: "En riesgo" },
-  { key: STUDENT_FILTER.PENDING, label: "Con pendientes" },
-  { key: STUDENT_FILTER.CAMPUS, label: "Sin subir al Campus" },
+const studentFilterOptions: { key: StudentFilter; label: string; description: string }[] = [
+  { key: STUDENT_FILTER.ALL, label: "Todos", description: "Todos los estudiantes del corte" },
+  { key: STUDENT_FILTER.RISK, label: "En riesgo", description: "Nota del corte menor a 3,0" },
+  { key: STUDENT_FILTER.PENDING, label: "Pendientes", description: "Con notas pendientes en este corte" },
+  { key: STUDENT_FILTER.CAMPUS, label: "Sin subir", description: "Sin subir al Campus (último Verificar Campus)" },
 ];
+
+// Outline icons (24x24, stroke = currentColor) for the sidebar global actions.
+const ICON_PATHS = {
+  plus: "M12 5v14M5 12h14",
+  sync: "M21 12a9 9 0 0 1-15.5 6.2L3 16M3 12a9 9 0 0 1 15.5-6.2L21 8M21 3v5h-5M3 21v-5h5",
+  check: "M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11",
+  external: "M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6",
+  download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
+  upload: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12",
+  clock: "M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20M12 6v6l4 2",
+  code: "M16 18l6-6-6-6M8 6l-6 6 6 6",
+  sun: "M12 8a4 4 0 1 0 0 8 4 4 0 1 0 0-8M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4",
+  moon: "M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z",
+} as const;
+
+function Icon({ name, size = 16 }: { name: keyof typeof ICON_PATHS; size?: number }) {
+  return <svg className="action-icon" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true"><path d={ICON_PATHS[name]} /></svg>;
+}
 
 const campusStateLabels = { uploaded: "✓ Subida", missing: "Falta", different: "Distinta" } as const;
 
@@ -126,6 +146,7 @@ function App() {
   const [activityPercent, setActivityPercent] = useState(40);
   const [examPercent, setExamPercent] = useState(60);
   const [error, setError] = useState("");
+  const [paletteCourseId, setPaletteCourseId] = useState<string | null>(null);
   const [updateModal, setUpdateModal] = useState(false);
   const [updateState, setUpdateState] = useState<"checking" | "none" | "available" | "installing" | "installed" | "error">("checking");
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
@@ -233,6 +254,19 @@ function App() {
       await openCourse(course);
     } catch {
       setError("No se pudo crear el curso. Verificá que nombre y semestre no estén repetidos.");
+    }
+  }
+
+  // The new color is shown only after it is saved, so a failed save keeps the old one.
+  async function handleCourseColor(course: Course, color: CourseColor) {
+    setPaletteCourseId(null);
+    if (color === course.color) return;
+    try {
+      await setCourseColor(course.id, color);
+      setCourses((current) => current.map((item) => item.id === course.id ? { ...item, color } : item));
+      setSelectedCourse((current) => current?.id === course.id ? { ...current, color } : current);
+    } catch {
+      setError("No se pudo guardar el color del curso.");
     }
   }
 
@@ -984,6 +1018,19 @@ function App() {
     );
   }
 
+  const darkTheme = colorScheme === "dark";
+  const themeSwitch = (
+    <Switch
+      className="theme-switch"
+      size="md"
+      labelPosition="left"
+      label={darkTheme ? "Tema oscuro" : "Tema claro"}
+      checked={darkTheme}
+      onChange={(event) => setColorScheme(event.currentTarget.checked ? "dark" : "light")}
+      thumbIcon={<Icon name={darkTheme ? "moon" : "sun"} size={12} />}
+    />
+  );
+
   return (
     <AppShell header={selectedCourse ? undefined : { height: 48 }} navbar={selectedCourse ? { width: 260, breakpoint: "xs" } : undefined} padding="md">
       {selectedCourse ? (
@@ -994,9 +1041,23 @@ function App() {
             <p className="sidebar-label">Cursos {sidebarSemester}</p>
             <nav className="sidebar-courses" aria-label="Cursos">
               {sidebarCourses.map((course) => (
-                <button key={course.id} type="button" className="sidebar-course" aria-current={course.id === selectedCourse.id ? "page" : undefined} onClick={() => void openCourse(course)}>
-                  <span>{course.name}</span><small>{course.students}</small>
-                </button>
+                <div key={course.id} className="sidebar-course-row" data-selected={course.id === selectedCourse.id || undefined} style={courseColorStyle(course.color) as CSSProperties}>
+                  <Popover opened={paletteCourseId === course.id} onChange={(opened) => setPaletteCourseId(opened ? course.id : null)} position="bottom-start" shadow="md" withinPortal>
+                    <Popover.Target>
+                      <button type="button" className="course-dot" aria-label={`Color de ${course.name}: ${COURSE_COLOR_SWATCHES[course.color].label}`} aria-haspopup="true" aria-expanded={paletteCourseId === course.id} onClick={() => setPaletteCourseId((current) => current === course.id ? null : course.id)} />
+                    </Popover.Target>
+                    <Popover.Dropdown className="course-palette">
+                      <div role="group" aria-label={`Elegir color de ${course.name}`}>
+                        {COURSE_COLORS.map((color) => (
+                          <button key={color} type="button" className="course-swatch" style={courseColorStyle(color) as CSSProperties} aria-label={COURSE_COLOR_SWATCHES[color].label} aria-pressed={course.color === color} onClick={() => void handleCourseColor(course, color)} />
+                        ))}
+                      </div>
+                    </Popover.Dropdown>
+                  </Popover>
+                  <button type="button" className="sidebar-course" aria-current={course.id === selectedCourse.id ? "page" : undefined} onClick={() => void openCourse(course)}>
+                    <span>{course.name}</span><small>{course.students}</small>
+                  </button>
+                </div>
               ))}
             </nav>
           </div>
@@ -1006,9 +1067,12 @@ function App() {
               {studentFilterOptions.map((option) => {
                 const unavailable = option.key === STUDENT_FILTER.CAMPUS && !campusCheckResult;
                 return (
-                  <button key={option.key} type="button" className="sidebar-filter" data-filter={option.key} aria-pressed={studentFilter === option.key} disabled={unavailable} onClick={() => setStudentFilter(option.key)}>
-                    <span>{option.label}</span><b>{unavailable ? "" : filterCounts[option.key]}</b>
-                  </button>
+                  <Tooltip key={option.key} label={option.description} openDelay={300} withinPortal>
+                    <button type="button" className="sidebar-filter" data-filter={option.key} aria-pressed={studentFilter === option.key} aria-describedby={`filter-${option.key}-description`} disabled={unavailable} onClick={() => setStudentFilter(option.key)}>
+                      <b>{unavailable ? "" : filterCounts[option.key]}</b><span>{option.label}</span>
+                      <span id={`filter-${option.key}-description`} hidden>{option.description}</span>
+                    </button>
+                  </Tooltip>
                 );
               })}
             </div>
@@ -1016,15 +1080,15 @@ function App() {
           </div>
           <div className="sidebar-actions">
             <p className="sidebar-label">Campus y datos</p>
-            <button type="button" className="accent" onClick={() => setCourseModal(true)}>+ Crear curso</button>
-            <button type="button" onClick={openCourseSync}>Sincronizar cursos</button>
-            <button type="button" onClick={openCampusCheck}>Verificar Campus</button>
-            <button type="button" onClick={() => void openCampusWindow()} aria-label="Abrir el Campus de Unimayor en una ventana de NOTAZOD">Abrir Campus</button>
-            <button type="button" onClick={() => void handleExportBackup()} aria-label="Exportar copia de seguridad de NOTAZOD">Exportar copia de seguridad</button>
-            <button type="button" onClick={() => void handleRestoreBackup()} aria-label="Restaurar copia de seguridad de NOTAZOD">Restaurar copia de seguridad</button>
-            <button type="button" onClick={() => void checkForUpdates()} aria-label="Buscar actualizaciones de NOTAZOD">Buscar actualizaciones</button>
-            <button type="button" onClick={() => void openUrl("https://github.com/CT-Zodiako/NOTAZOD")} aria-label="Abrir repositorio de NOTAZOD en GitHub">GitHub</button>
-            <button type="button" onClick={() => setColorScheme(colorScheme === "dark" ? "light" : "dark")} aria-label="Cambiar tema">{colorScheme === "dark" ? "Tema claro" : "Tema oscuro"}</button>
+            <button type="button" className="accent" onClick={() => setCourseModal(true)}><Icon name="plus" />Crear curso</button>
+            <button type="button" onClick={openCourseSync}><Icon name="sync" />Sincronizar cursos</button>
+            <button type="button" onClick={openCampusCheck}><Icon name="check" />Verificar Campus</button>
+            <button type="button" onClick={() => void openCampusWindow()} aria-label="Abrir el Campus de Unimayor en una ventana de NOTAZOD"><Icon name="external" />Abrir Campus</button>
+            <button type="button" onClick={() => void handleExportBackup()} aria-label="Exportar copia de seguridad de NOTAZOD"><Icon name="download" />Exportar copia de seguridad</button>
+            <button type="button" onClick={() => void handleRestoreBackup()} aria-label="Restaurar copia de seguridad de NOTAZOD"><Icon name="upload" />Restaurar copia de seguridad</button>
+            <button type="button" onClick={() => void checkForUpdates()} aria-label="Buscar actualizaciones de NOTAZOD"><Icon name="clock" />Buscar actualizaciones</button>
+            <button type="button" onClick={() => void openUrl("https://github.com/CT-Zodiako/NOTAZOD")} aria-label="Abrir repositorio de NOTAZOD en GitHub"><Icon name="code" />GitHub</button>
+            <div className="theme-row">{themeSwitch}</div>
           </div>
         </AppShell.Navbar>
       ) : (
@@ -1039,7 +1103,7 @@ function App() {
             <Button variant="subtle" size="xs" onClick={() => void handleRestoreBackup()} aria-label="Restaurar copia de seguridad de NOTAZOD">Restaurar copia de seguridad</Button>
             <Button variant="subtle" size="xs" onClick={() => void checkForUpdates()} aria-label="Buscar actualizaciones de NOTAZOD">Buscar actualizaciones</Button>
             <Button variant="subtle" size="xs" onClick={() => void openUrl("https://github.com/CT-Zodiako/NOTAZOD")} aria-label="Abrir repositorio de NOTAZOD en GitHub">GitHub</Button>
-            <Button variant="subtle" size="xs" onClick={() => setColorScheme(colorScheme === "dark" ? "light" : "dark")} aria-label="Cambiar tema">{colorScheme === "dark" ? "Tema claro" : "Tema oscuro"}</Button>
+            {themeSwitch}
           </Group>
         </Container>
       </AppShell.Header>
@@ -1084,7 +1148,7 @@ function App() {
             ) : (
               <Stack gap="md">
                 <div className="course-header">
-                  <div><Title order={1}>{selectedCourse.name}</Title><Text c="dimmed" size="sm" mt={4}>{courseSubtitle}</Text></div>
+                  <div><Title order={1} className="course-title" style={courseColorStyle(selectedCourse.color) as CSSProperties}><span className="course-title-dot" aria-hidden="true" />{selectedCourse.name}</Title><Text c="dimmed" size="sm" mt={4}>{courseSubtitle}</Text></div>
                   <Group gap="xs">
                     <Button color="green" variant="light" disabled={!students.length} onClick={openCampusUpload}>Subir al Campus</Button>
                     <Menu shadow="md" width={240}><Menu.Target><Button color="pink" variant="filled" disabled={activeState !== "active"}>Calificar ▾</Button></Menu.Target><Menu.Dropdown>{gradeItems.map((item) => <Menu.Item key={item.id} onClick={() => openGradeWalkthrough(item)}>Calificar {item.name}</Menu.Item>)}<Menu.Divider /><Menu.Item onClick={() => openGroupGradeModal()}>Calificar grupo</Menu.Item></Menu.Dropdown></Menu>

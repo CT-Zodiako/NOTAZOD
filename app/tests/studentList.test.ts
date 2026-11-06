@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { CheckGroup } from "../src/lib/campus.ts";
-import { campusStateFor, countByFilter, hasPendingGrade, heatTint, isAtRisk, isMissingInCampus, matchesFilter } from "../src/lib/studentList.ts";
+import { campusStateFor, COURSE_COLOR_SWATCHES, countByFilter, courseColorStyle, hasPendingGrade, heatTint, isAtRisk, isMissingInCampus, matchesFilter } from "../src/lib/studentList.ts";
 
 test("heat: a passing grade uses the passing token, 10% at 3,0 up to 55% at 5,0", () => {
   assert.deepEqual(heatTint({ value: 3, pending: 0 }), { kind: "graded", token: "--color-grade-passing", percent: 10 });
@@ -94,4 +94,20 @@ test("filters: each filter keeps the matching students", () => {
 test("filters: counts per filter", () => {
   assert.deepEqual(countByFilter(statuses), { all: 4, risk: 2, pending: 2, campus: 2 });
   assert.deepEqual(countByFilter([]), { all: 0, risk: 0, pending: 0, campus: 0 });
+});
+
+test("course colors: the six palette keys map to their design tokens and names in palette order", () => {
+  assert.deepEqual(Object.entries(COURSE_COLOR_SWATCHES).map(([key, swatch]) => [key, swatch.token, swatch.label]), [
+    ["primary", "--color-action-primary", "Vino"],
+    ["locked", "--color-grade-locked", "Azul acero"],
+    ["focus", "--color-border-focus", "Dorado"],
+    ["pending", "--color-grade-pending", "Violeta"],
+    ["passing", "--color-grade-passing", "Verde"],
+    ["warning", "--color-feedback-warning", "Naranja"],
+  ]);
+});
+
+test("course colors: the style exposes the course color as a CSS variable", () => {
+  assert.deepEqual(courseColorStyle("passing"), { "--course-color": "var(--color-grade-passing)" });
+  assert.deepEqual(courseColorStyle("primary"), { "--course-color": "var(--color-action-primary)" });
 });

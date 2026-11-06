@@ -2,11 +2,21 @@ import Database from "@tauri-apps/plugin-sql";
 import { invoke } from "@tauri-apps/api/core";
 import type { CampusGroupMetadata, ExistingCourse, SyncAction } from "./campusSync";
 
+// Palette keys a course color may take (S11); App maps each one to a design token.
+export const COURSE_COLORS = ["primary", "locked", "focus", "pending", "passing", "warning"] as const;
+export type CourseColor = (typeof COURSE_COLORS)[number];
+export const DEFAULT_COURSE_COLOR: CourseColor = "primary";
+
+export function isCourseColor(value: unknown): value is CourseColor {
+  return typeof value === "string" && (COURSE_COLORS as readonly string[]).includes(value);
+}
+
 export type Course = {
   id: string;
   name: string;
   semester: string;
   students: number;
+  color: CourseColor;
   campusGroups?: CampusGroupMetadata[];
 };
 
@@ -146,6 +156,7 @@ export async function initDatabase() {
   await db.execute("UPDATE students SET sort_order = rowid WHERE sort_order = 0");
   try { await db.execute("ALTER TABLE periods ADD COLUMN closed INTEGER NOT NULL DEFAULT 0"); } catch { /* existing schema already migrated */ }
   try { await db.execute("ALTER TABLE grade_items ADD COLUMN period_id TEXT REFERENCES periods(id) ON DELETE CASCADE"); } catch { /* existing schema already migrated */ }
+  try { await db.execute("ALTER TABLE courses ADD COLUMN color TEXT"); } catch { /* existing schema already migrated */ }
   await db.execute(`
     CREATE TABLE IF NOT EXISTS grades (
       student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -192,22 +203,34 @@ export async function initDatabase() {
 
 export async function listCourses(): Promise<Course[]> {
   const db = await getDatabase();
-  const courses = await db.select<Course[]>(`
-    SELECT c.id, c.name, c.semester, COUNT(s.id) AS students
+  const courses = await db.select<(Omit<Course, "color"> & { color: string | null })[]>(`
+    SELECT c.id, c.name, c.semester, c.color, COUNT(s.id) AS students
     FROM courses c
     LEFT JOIN students s ON s.course_id = c.id
     GROUP BY c.id
     ORDER BY c.name COLLATE NOCASE
   `);
   const groups = await db.select<(CampusGroupMetadata & { courseId: string })[]>(`SELECT course_id AS courseId, campus_key AS key, program, group_name AS "group", schedule, room FROM campus_course_groups ORDER BY group_name`);
-  return courses.map((course) => ({ ...course, campusGroups: groups.filter((group) => group.courseId === course.id) }));
+  return courses.map((course) => ({
+    ...course,
+    color: isCourseColor(course.color) ? course.color : DEFAULT_COURSE_COLOR,
+    campusGroups: groups.filter((group) => group.courseId === course.id),
+  }));
 }
 
 export async function createCourse(name: string, semester: string): Promise<Course> {
   const db = await getDatabase();
   const id = crypto.randomUUID();
   await db.execute("INSERT INTO courses (id, name, semester) VALUES ($1, $2, $3)", [id, name, semester]);
-  return { id, name, semester, students: 0 };
+  return { id, name, semester, students: 0, color: DEFAULT_COURSE_COLOR };
+}
+
+// Validates before touching the database, so a rejected color never writes.
+export async function setCourseColor(courseId: string, color: string) {
+  if (!isCourseColor(color)) throw new Error(`Invalid course color: ${color}`);
+  const db = await getDatabase();
+  const result = await db.execute("UPDATE courses SET color = $1 WHERE id = $2", [color, courseId]);
+  if (result.rowsAffected !== 1) throw new Error("Course not found");
 }
 
 async function resolveBackupPath(): Promise<string> {
