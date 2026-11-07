@@ -1850,7 +1850,6 @@ function AttendanceView({ courseId, students, reload, focusSessionId }: { course
       <p className="attendance-legend">
         <span className="attendance-hour" data-state="present">✓</span>Presente
         <span className="attendance-hour" data-state="absent">F</span>Falta (cuenta por hora)
-        <span className="attendance-hour" data-state="justified">J</span>Justificada (no cuenta, queda registrada)
       </p>
       <Modal opened={!!correction} onClose={() => setCorrection(null)} title="Corregir falta" centered size="560px">
         {correction && selected ? <CorrectionForm session={selected} student={correction.student} states={correction.states} onCancel={() => setCorrection(null)} onSaved={() => { setCorrection(null); setRefresh((value) => value + 1); }} /> : null}
