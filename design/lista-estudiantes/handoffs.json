@@ -4,11 +4,11 @@
   "handoffs": {
     "03-panel-mapa-calor.html": {
       "status": "in_progress",
-      "queued": false,
-      "sentAt": "2026-11-06T23:17:12.584Z",
-      "startedAt": "2026-11-06T23:17:29.342Z",
+      "queued": true,
+      "sentAt": "2026-11-07T00:03:19.172Z",
+      "startedAt": "2026-11-07T00:03:51.743Z",
       "implementedAt": null,
-      "note": "Applying the latest artboard changes: sidebar icons + theme switch, compact 2x2 filters, per-course color (new courses.color column)."
+      "note": "Applying: one-line course rows, 12-color course palette (new --course-* tokens), smaller filters, no sidebar logo, Campus y datos below filters, theme switch first."
     }
   }
 }

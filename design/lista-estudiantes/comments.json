@@ -44,6 +44,61 @@
       "status": "resolved",
       "sentAt": "2026-11-06T23:15:39.600Z",
       "resolvedAt": "2026-11-06T23:16:09.101Z"
+    },
+    {
+      "id": "26udz9ub",
+      "file": "03-panel-mapa-calor.html",
+      "selector": "body > aside > div:nth-of-type(1)",
+      "excerpt": "CURSOS 2026-2 Fundamentos de programación 13 Programación orientada a objetos I 27 Aplicaciones web II 17 Bases de datos 22",
+      "comment": "que sol oqeu en un renglón cada curso que no ocupe tanto espacio y pon mas colores",
+      "createdAt": "2026-11-06T23:41:14.235Z",
+      "status": "resolved",
+      "sentAt": "2026-11-06T23:41:14.252Z",
+      "resolvedAt": "2026-11-06T23:41:31.709Z"
+    },
+    {
+      "id": "7lnodu8c",
+      "file": "03-panel-mapa-calor.html",
+      "selector": "body > aside > div:nth-of-type(2)",
+      "excerpt": "MOSTRAR 13 Todos 6 En riesgo 3 Pendientes 3 Sin subir",
+      "comment": "mas pequenos",
+      "createdAt": "2026-11-06T23:41:31.212Z",
+      "status": "resolved",
+      "sentAt": "2026-11-06T23:41:31.232Z",
+      "resolvedAt": "2026-11-06T23:41:45.903Z"
+    },
+    {
+      "id": "q3klbsb1",
+      "file": "03-panel-mapa-calor.html",
+      "selector": "body > aside > span",
+      "excerpt": "NOTAZOD",
+      "comment": "quita el logo que tenemos",
+      "createdAt": "2026-11-06T23:41:58.896Z",
+      "status": "resolved",
+      "sentAt": "2026-11-06T23:41:58.906Z",
+      "resolvedAt": "2026-11-06T23:43:51.205Z"
+    },
+    {
+      "id": "adlgh556",
+      "file": "03-panel-mapa-calor.html",
+      "selector": "body > aside > div:nth-of-type(3)",
+      "excerpt": "CAMPUS Y DATOS Crear curso Sincronizar cursos Verificar Campus Abrir Campus Exportar copia de seguridad Restaurar copia de seguridad Buscar actualizaciones Tema oscuro",
+      "comment": "suebelo mas arriba pegado al de selecciona de arriba",
+      "createdAt": "2026-11-06T23:46:25.699Z",
+      "status": "resolved",
+      "sentAt": "2026-11-06T23:46:25.712Z",
+      "resolvedAt": "2026-11-06T23:46:32.745Z"
+    },
+    {
+      "id": "nepch7ze",
+      "file": "03-panel-mapa-calor.html",
+      "selector": "body > aside > div:nth-of-type(3) > div",
+      "excerpt": "Tema oscuro",
+      "comment": "pongee arriba de primero",
+      "createdAt": "2026-11-06T23:50:37.930Z",
+      "status": "resolved",
+      "sentAt": "2026-11-06T23:50:37.941Z",
+      "resolvedAt": "2026-11-06T23:50:45.515Z"
     }
   ]
 }
