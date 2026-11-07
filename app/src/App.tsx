@@ -1688,8 +1688,11 @@ function RollCallForm({ courseId, schedules, students, onCancel, onSaved }: { co
   }
 
   function onKey(event: React.KeyboardEvent) {
-    if (reviewing || !current || (event.target as HTMLElement).tagName === "INPUT") return;
+    const tag = (event.target as HTMLElement).tagName;
+    if (reviewing || !current || tag === "INPUT" || tag === "TEXTAREA") return;
     const key = event.key.toLowerCase();
+    // Enter on a focused button must run that button (No asistió, Llegó tarde, Cancelar…), never the shortcut.
+    if (key === "enter" && tag === "BUTTON") return;
     if (key === "a" || (key === "enter" && !event.shiftKey)) { event.preventDefault(); mark(resizeStates([], hours).map(() => "present")); }
     else if (key === "n") { event.preventDefault(); mark(resizeStates([], hours).map(() => "absent")); }
     else if (key === "h" || (key === "enter" && event.shiftKey)) { event.preventDefault(); setStep((value) => Math.max(0, value - 1)); }
