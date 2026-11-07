@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "chosen": "01-pestana-sesiones.html",
+  "handoffs": {
+    "01-pestana-sesiones.html": {
+      "status": "in_progress",
+      "queued": false,
+      "sentAt": "2026-11-07T01:55:52.072Z",
+      "startedAt": "2026-11-07T01:56:03.178Z",
+      "implementedAt": null,
+      "note": "Starting on branch feature/attendance (new attendance tables) in NOTAZOD Test."
+    }
+  }
+}

@@ -1,0 +1,23 @@
+# Attendance (artboard 01 "Pestaña Asistencia por fecha")
+Manual, offline roll call inside the course view: absences per class hour, late-arrival corrections, removal only with a reason, full history. Implements `design/asistencia/01-pestana-sesiones.html` (chosen; 02 and 03 are alternatives).
+Branch `feature/attendance` (on top of `feature/home-agenda`). Built and tried in NOTAZOD Test only.
+
+## Specs
+- S1: User: "vamos ahcer etonces lago en notazo que sea facil de utlizar la idea es poder llamra lsita facil sencillo". User chose "Lista rápida manual": a "Tomar asistencia" button in the course header opens a roll call where every student starts present; tapping a student's name toggles all hours absent/present; tapping one hour toggles only that hour; a live summary shows "N presentes · N con faltas · N faltas en total"; saving creates one dated session. Works with no internet.
+- S2: User: "ls flatas secuentn por horases decir 1 hora es una flaa si son 3 hroas y falta l a clase tiene 3 faltas". Each session has a date, a start time and a number of class hours; every absent hour is one absence. The default hours come from the course's Campus schedule for that weekday (e.g. "JUE 15:00-18:00" = 3 hours, start 15:00; when several groups/segments match, the longest); with no schedule the default is 2; the teacher can change date, start time and hours (1-6) before saving.
+- S3: User: "yo debo poder corregirlas por si llega a la 2 hora  o la ahora uqe llego". "Corregir" on a student of a session offers "Llegó tarde": choosing hour N marks hours before N absent and hours N.. present.
+- S4: User: "deberi poder borrar falta tambien tener encuenta de que si la borro por excusa o porque relamente si vino". Removing absences needs a reason type: "Justificar (excusa)" with a required free-text motive — the hours become justified: they no longer count as absences but stay visible as justified; or "Sí vino" — error in the roll call, all hours become present.
+- S5: User: "se debe guardar las fechas que se llama asitencia". Every session (date, start, hours, created_at) is stored per course and listed newest first. Every correction appends an immutable history entry (when, action, motive, previous and new per-hour states) shown in the correction dialog; nothing is deleted.
+- S6: User: "que se vea como una integracion". A third view "Asistencia" next to "Notas / Grupos" in the course view, following the artboard: session list on the left (date, hours, "N ausentes" or "Completo"), the selected session's per-hour detail on the right (✓ present, F absent, J justified) with "Faltas de esta clase" and "Total del curso" (absent hours / total recorded hours), a "Corregir" action per student, and the legend. Tokens only, dark and light.
+- S7: Data safety: new tables only (additive migration, idempotent); no existing table or row changes; deleting a course cascades its attendance (COURSE_CASCADE_KEYS updated so deleteCourse's cascade assertion covers them); a student added after a session has no marks for it (shown as "—", not counted); all writes validate input (hours 1-6, hour index in range, state in present/absent/justified, motive required for excuses) and reject without writing.
+
+## Tasks
+- T1 (S2, S5, S7) Schema + db.ts API (create session with marks, list sessions, marks, totals, correct with history) with temp-SQLite tests including the migration of a database created by the previous code. Route: worker. Risk: item 1. Commit: pending
+- T2 (S1-S4) Pure attendance helpers (default hours from schedule, late-arrival states, totals) with tests. Route: worker. Commit: pending
+- T3 (S1, S3, S4, S6) UI: Tomar asistencia modal, Asistencia view, Corregir dialog with history. Route: worker. Commit: pending
+- T4 Independent verify (risk item 1), native review, build/install NOTAZOD Test, handoff. Route: verify + inline. Commit: n/a
+
+## Log
+- L1: "vamos ahcer etonces lago en notazo que sea facil de utlizar la idea es poder llamra lsita facil sencillo , hay que tenrreglas por ejemplo ls flatas secuentn por horases decir 1 hora es una flaa si son 3 hroas y falta l a clase tiene 3 faltas yo debo poder corregirlas por si llega a la 2 hora  o la ahora uqe llego , y deberi poder borrar falta tambien tener encuenta de que si la borro por excusa o porque relamente si vino se debe guardar las fechas que se llama asitencia que se vea como una integracion"
+- L2: User chose "Lista rápida manual" (camera kiosk and local network deferred). Assumed and stated: absences do not change grades automatically.
+- L3: Design `design/asistencia/` (01-pestana-sesiones, 02-columna-en-notas, 03-matriz-fechas); user handed off 01.

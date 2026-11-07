@@ -1,0 +1,27 @@
+{
+  "title": "Asistencia",
+  "brief": "Simple manual roll call inside the course view: absences counted per class hour (3-hour class = 3 absences), late arrival corrected by the hour the student arrived, absences removed only with a reason (excuse = justified, or 'Sí vino' = list error) and every change kept with its date; every roll call is a dated session. Integrated with the existing course view (sidebar, tokens, Notas/Grupos switch).",
+  "artboards": [
+    {
+      "file": "01-pestana-sesiones.html",
+      "title": "Pestaña Asistencia por fecha",
+      "tradeoff": "New 'Asistencia' tab: list of dated sessions on the left and that day's per-hour detail with totals on the right. Clear for reviewing one class; comparing a student across dates needs clicking through sessions.",
+      "width": 1280,
+      "height": 860
+    },
+    {
+      "file": "02-columna-en-notas.html",
+      "title": "Columna Faltas dentro de Notas",
+      "tradeoff": "No new tab: a 'Faltas' column in the grade table and a side panel with the student's timeline and corrections. Best integration with grades; the per-date view of the whole class is weaker.",
+      "width": 1280,
+      "height": 860
+    },
+    {
+      "file": "03-matriz-fechas.html",
+      "title": "Matriz de asistencia por fecha",
+      "tradeoff": "Students × dates grid in an 'Asistencia' tab: absences per cell with heat color, justified striped, corrected cells marked; click a cell to correct. Most complete overview; gets wide after many classes (scrolls horizontally).",
+      "width": 1280,
+      "height": 860
+    }
+  ]
+}
