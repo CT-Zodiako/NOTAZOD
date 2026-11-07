@@ -121,3 +121,43 @@ test("history (S5): each correction is described with the absences it replaced",
   assert.equal(describeHistoryEntry({ action: "excuse", motive: "Incapacidad médica", beforeStates: ["absent", "absent", "absent"], afterStates: ["justified", "justified", "justified"] }), "Justificada: Incapacidad médica (antes 3 faltas)");
   assert.equal(describeHistoryEntry({ action: "present", motive: null, beforeStates: ["absent", "present"], afterStates: ["present", "present"] }), "Sí vino: presente en todas las horas (antes 1 falta)");
 });
+
+// Design 04: the correction dialog edits the hours directly and asks why; planCorrection maps that to a stored correction.
+import { hourRangeLabel, planCorrection, toggleCorrectionHour } from "../src/lib/attendance.ts";
+
+test("correction: late arrival from tapped hours (absent first, present from the arrival hour)", () => {
+  const plan = planCorrection(["absent", "absent", "absent"], ["absent", "present", "present"], "late", "");
+  assert.deepEqual(plan, { correction: { action: "late", arrivalHour: 2 }, after: ["absent", "present", "present"] });
+});
+
+test("correction: 'Llegó tarde' with hours that are not a late arrival explains the rule", () => {
+  assert.deepEqual(planCorrection(["absent", "absent", "absent"], ["present", "absent", "present"], "late", ""), { hint: "Para «Llegó tarde» dejá en falta las horas antes de que llegara y en presente desde que llegó." });
+});
+
+test("correction: an excuse justifies every absent hour and needs a motive", () => {
+  assert.deepEqual(planCorrection(["absent", "present", "absent"], ["absent", "present", "absent"], "excuse", "  "), { hint: "Escribí el motivo de la excusa." });
+  assert.deepEqual(planCorrection(["absent", "present", "absent"], ["absent", "present", "absent"], "excuse", "Incapacidad"), { correction: { action: "excuse", motive: "Incapacidad" }, after: ["justified", "present", "justified"] });
+});
+
+test("correction: 'Error de lista' marks every hour present", () => {
+  assert.deepEqual(planCorrection(["absent", "absent"], ["absent", "present"], "error", ""), { correction: { action: "present" }, after: ["present", "present"] });
+});
+
+test("correction: no reason, or a reason that changes nothing, asks for something else", () => {
+  assert.deepEqual(planCorrection(["absent", "absent"], ["present", "present"], null, ""), { hint: "Elegí por qué cambia." });
+  assert.deepEqual(planCorrection(["present", "present"], ["present", "present"], "error", ""), { hint: "Esta corrección no cambia ninguna hora." });
+  assert.deepEqual(planCorrection(["present", "present"], ["present", "present"], "excuse", "Permiso"), { hint: "Esta corrección no cambia ninguna hora." });
+});
+
+test("correction: tapping an hour toggles absent and present; a justified hour becomes present", () => {
+  assert.deepEqual(toggleCorrectionHour(["absent", "present", "justified"], 0), ["present", "present", "justified"]);
+  assert.deepEqual(toggleCorrectionHour(["absent", "present", "justified"], 1), ["absent", "absent", "justified"]);
+  assert.deepEqual(toggleCorrectionHour(["absent", "present", "justified"], 2), ["absent", "present", "present"]);
+});
+
+test("correction: each hour shows its real time range from the session start", () => {
+  assert.equal(hourRangeLabel("15:00", 0), "15:00–16:00");
+  assert.equal(hourRangeLabel("15:00", 2), "17:00–18:00");
+  assert.equal(hourRangeLabel("7:30", 1), "08:30–09:30");
+  assert.equal(hourRangeLabel("bad", 0), "");
+});

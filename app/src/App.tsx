@@ -36,7 +36,7 @@ import { currentSemester, planCourseSync, SyncAction } from "./lib/campusSync";
 import { hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
 import { campusStateFor, COURSE_COLOR_SWATCHES, courseColorStyle, countByFilter, hasPendingGrade, heatTint, isAtRisk, matchesFilter, STUDENT_FILTER, StudentFilter, StudentStatus } from "./lib/studentList";
 import { buildWeek, dayLabel, formatTime, nextClass, nextClassLabel, weekdayName } from "./lib/schedule";
-import { absenceLabel, applyCorrection, AttendanceCorrection, AttendanceState, courseTotalLabel, defaultSessionTiming, describeHistoryEntry, formatSessionDate, isValidSessionHours, MAX_SESSION_HOURS, MIN_SESSION_HOURS, resizeStates, rollCallDefaults, rollCallSummary, sessionLabel, stateCounts, toggleHour, toggleStudent } from "./lib/attendance";
+import { absenceLabel, AttendanceState, CorrectionReason, hourRangeLabel, planCorrection, toggleCorrectionHour, courseTotalLabel, defaultSessionTiming, describeHistoryEntry, formatSessionDate, isValidSessionHours, MAX_SESSION_HOURS, MIN_SESSION_HOURS, resizeStates, rollCallDefaults, rollCallSummary, sessionLabel, stateCounts, toggleHour, toggleStudent } from "./lib/attendance";
 
 const studentFilterOptions: { key: StudentFilter; label: string; description: string }[] = [
   { key: STUDENT_FILTER.ALL, label: "Todos", description: "Todos los estudiantes del corte" },
@@ -1802,16 +1802,16 @@ function AttendanceView({ courseId, students, reload, focusSessionId }: { course
   );
 }
 
-const correctionOptions = [
-  { action: "late", label: "Llegó tarde", description: "Elegí la hora en que llegó; las anteriores quedan como falta." },
-  { action: "excuse", label: "Justificar (excusa)", description: "La falta deja de contar, pero queda registrada como justificada." },
-  { action: "present", label: "Sí vino", description: "Error al tomar la lista: queda presente en todas las horas." },
+const correctionReasons = [
+  { reason: "late", label: "Llegó tarde" },
+  { reason: "excuse", label: "Tiene excusa" },
+  { reason: "error", label: "Error de lista" },
 ] as const;
 
-// S3, S4, S5: one of three corrections, a preview of the new hours and the full history.
+// Design 04: tap each hour (with its real time) like the roll call, say why it changes, and see Antes → Ahora.
 function CorrectionForm({ session, student, states, onCancel, onSaved }: { session: AttendanceSession; student: Student; states: AttendanceState[]; onCancel: () => void; onSaved: () => void }) {
-  const [action, setAction] = useState<AttendanceCorrection["action"] | null>(null);
-  const [arrivalHour, setArrivalHour] = useState<number | null>(null);
+  const [edited, setEdited] = useState<AttendanceState[]>(states);
+  const [reason, setReason] = useState<CorrectionReason | null>(null);
   const [motive, setMotive] = useState("");
   const [history, setHistory] = useState<AttendanceHistoryEntry[] | null>(null);
   const [saving, setSaving] = useState(false);
@@ -1819,25 +1819,40 @@ function CorrectionForm({ session, student, states, onCancel, onSaved }: { sessi
 
   useEffect(() => {
     let current = true;
-    listAttendanceHistory(session.id, student.id).then((entries) => { if (current) setHistory(entries); }).catch(() => { if (current) setHistory([]); });
+    listAttendanceHistory(session.id, student.id)
+      .then((entries) => { if (current) setHistory(entries); })
+      .catch((cause) => { if (current) { setHistory([]); setSaveError(`No se pudo cargar el historial. Detalle: ${errorDetail(cause)}`); } });
     return () => { current = false; };
   }, [session.id, student.id]);
 
-  const correction: AttendanceCorrection | null = action === "late" ? (arrivalHour ? { action, arrivalHour } : null) : action === "excuse" ? { action, motive } : action === "present" ? { action } : null;
-  let preview: AttendanceState[] | null = null;
-  let hint = "";
-  if (action === "late" && !arrivalHour) hint = "Elegí la hora en que llegó.";
-  else if (action === "excuse" && !motive.trim()) hint = "Escribí el motivo de la excusa.";
-  else if (correction) {
-    try { preview = applyCorrection(states, correction); } catch { hint = "Esta corrección no cambia ninguna hora."; }
+  const plan = planCorrection(states, edited, reason, motive);
+  const after = "after" in plan ? plan.after : null;
+  // With an excuse the absent hours turn J; otherwise the buttons show what was tapped.
+  const shown = reason === "excuse" ? states.map((state) => state === "absent" ? "justified" : state) : edited;
+
+  function tapHour(index: number) {
+    setEdited((current) => toggleCorrectionHour(reason === "excuse" ? states : current, index));
+    if (reason === "excuse" || reason === "error") setReason(null);
+  }
+
+  function chooseReason(next: CorrectionReason) {
+    setReason(next);
+    if (next === "excuse") setEdited(states);
+    if (next === "error") setEdited(states.map(() => "present"));
+  }
+
+  function shortcut(arrivalHour: number) {
+    if (arrivalHour === 1) { chooseReason("error"); return; }
+    setEdited(states.map((_, index) => index + 1 < arrivalHour ? "absent" : "present"));
+    setReason("late");
   }
 
   async function save() {
-    if (!correction || !preview) return;
+    if (!("correction" in plan)) return;
     setSaving(true);
     setSaveError("");
     try {
-      await correctAttendance(session.id, student.id, correction);
+      await correctAttendance(session.id, student.id, plan.correction);
       onSaved();
     } catch (cause) {
       setSaveError(`No se pudo guardar la corrección. No se cambió nada. Detalle: ${errorDetail(cause)}`);
@@ -1845,31 +1860,44 @@ function CorrectionForm({ session, student, states, onCancel, onSaved }: { sessi
     }
   }
 
-  const absences = stateCounts(states).absent;
+  const beforeAbsences = stateCounts(states).absent;
+  const afterStates = after ?? shown;
+  const afterAbsences = stateCounts(afterStates).absent;
   return (
     <Stack gap="sm">
-      <Text c="dimmed" size="sm">{student.fullName} · {formatSessionDate(session.date)} · {absences} {absences === 1 ? "falta" : "faltas"} de {session.hours} {session.hours === 1 ? "hora" : "horas"}</Text>
-      <HourMarks states={states} />
-      <div className="attendance-options" role="radiogroup" aria-label="Tipo de corrección">
-        {correctionOptions.map((option) => (
-          <label key={option.action} className="attendance-option" data-selected={action === option.action || undefined}>
-            <input type="radio" name="attendance-correction" value={option.action} checked={action === option.action} onChange={() => setAction(option.action)} />
-            <span>
-              <b>{option.label}</b>
-              <Text c="dimmed" size="sm" span>{option.description}</Text>
-              {option.action === "late" && action === "late" ? (
-                <Group gap={6} mt={6} role="group" aria-label="Hora de llegada">
-                  {states.map((_, index) => <Button key={index} size="compact-sm" variant={arrivalHour === index + 1 ? "filled" : "default"} aria-pressed={arrivalHour === index + 1} onClick={() => setArrivalHour(index + 1)}>Hora {index + 1}</Button>)}
-                </Group>
-              ) : null}
-              {option.action === "excuse" && action === "excuse" ? (
-                <Textarea mt={6} autosize minRows={2} aria-label="Motivo de la excusa" placeholder="Motivo: incapacidad médica, permiso…" value={motive} onChange={(event) => setMotive(event.currentTarget.value)} required />
-              ) : null}
-            </span>
-          </label>
+      <Group justify="space-between" align="baseline" gap="xs">
+        <Text fw={700}>{student.fullName}</Text>
+        <Text c="dimmed" size="sm">{formatSessionDate(session.date)} · {session.hours} {session.hours === 1 ? "hora" : "horas"}{hourRangeLabel(session.startTime, 0) ? ` · desde ${session.startTime}` : ""}</Text>
+      </Group>
+      <div className="correction-hours" role="group" aria-label="Horas de la clase">
+        {shown.map((state, index) => (
+          <div key={index} className="correction-hour">
+            <button type="button" className="correction-hour-button" data-state={state} data-changed={state !== states[index] || undefined} aria-label={`Hora ${index + 1}: ${hourStateLabels[state]}. Tocá para cambiarla.`} onClick={() => tapHour(index)}>{hourStateMarks[state]}</button>
+            <small>Hora {index + 1}{hourRangeLabel(session.startTime, index) ? <><br />{hourRangeLabel(session.startTime, index)}</> : null}</small>
+          </div>
         ))}
       </div>
-      {preview ? <Group gap="xs"><Text size="sm">Quedará así:</Text><HourMarks states={preview} /></Group> : hint ? <Text c="dimmed" size="sm">{hint}</Text> : null}
+      <Text ta="center" c="dimmed" size="sm">Tocá cada hora para cambiarla: <b>F</b> falta · <b>✓</b> presente</Text>
+      <Group justify="center" gap={6}>
+        <Button size="compact-sm" variant="default" className="correction-shortcut" onClick={() => shortcut(1)}>Vino toda la clase</Button>
+        {states.slice(1).map((_, index) => (
+          <Button key={index} size="compact-sm" variant="default" className="correction-shortcut" onClick={() => shortcut(index + 2)}>Llegó en la {index + 2}.ª hora{hourRangeLabel(session.startTime, index + 1) ? ` (${hourRangeLabel(session.startTime, index + 1).split("–")[0]})` : ""}</Button>
+        ))}
+      </Group>
+      <Text size="sm" fw={700}>¿Por qué cambia?</Text>
+      <Group gap="xs" role="group" aria-label="Motivo del cambio">
+        {correctionReasons.map((option) => (
+          <Button key={option.reason} radius="xl" variant={reason === option.reason ? "light" : "default"} aria-pressed={reason === option.reason} onClick={() => chooseReason(option.reason)}>{option.label}</Button>
+        ))}
+      </Group>
+      {reason === "excuse" ? <Textarea autosize minRows={2} aria-label="Motivo de la excusa" placeholder="Motivo de la excusa (obligatorio): incapacidad médica, permiso…" value={motive} onChange={(event) => setMotive(event.currentTarget.value)} required /> : null}
+      <div className="correction-compare" aria-live="polite">
+        <div><span className="correction-compare-label">Antes</span><HourMarks states={states} /></div>
+        <span className="correction-compare-arrow" aria-hidden="true">→</span>
+        <div><span className="correction-compare-label">Ahora</span><HourMarks states={afterStates} /></div>
+      </div>
+      <Text ta="center" size="sm">Faltas en esta clase: <b>{beforeAbsences}</b> → <b>{afterAbsences}</b>{afterStates.includes("justified") ? " · las J quedan justificadas (no cuentan)" : ""}</Text>
+      {"hint" in plan ? <Text ta="center" c="red" size="sm">{plan.hint}</Text> : null}
       <p className="sidebar-label attendance-history-label"><Icon name="history" />Historial</p>
       <ul className="attendance-history">
         {history === null ? <li>Cargando…</li> : history.length ? history.map((entry) => (
@@ -1879,7 +1907,7 @@ function CorrectionForm({ session, student, states, onCancel, onSaved }: { sessi
       {saveError ? <Text c="red" size="sm" role="alert">{saveError}</Text> : null}
       <Group justify="flex-end" gap="xs">
         <Button variant="default" onClick={onCancel}>Cancelar</Button>
-        <Button loading={saving} disabled={!preview} onClick={() => void save()}>Guardar corrección</Button>
+        <Button loading={saving} disabled={!after} onClick={() => void save()}>Guardar corrección</Button>
       </Group>
     </Stack>
   );

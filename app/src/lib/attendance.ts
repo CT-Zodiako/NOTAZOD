@@ -85,6 +85,45 @@ export function applyCorrection(states: AttendanceState[], correction: Attendanc
   return next;
 }
 
+// Design 04 (asistencia/04-corregir-tocando-horas): the dialog edits the hours and asks why.
+export type CorrectionReason = "late" | "excuse" | "error";
+export type CorrectionPlan = { correction: AttendanceCorrection; after: AttendanceState[] } | { hint: string };
+
+// Tapping an hour in the correction dialog: absent <-> present, a justified hour becomes present.
+export function toggleCorrectionHour(states: AttendanceState[], index: number): AttendanceState[] {
+  return states.map((state, position) => position === index ? (state === "present" ? "absent" : "present") : state);
+}
+
+// Maps the edited hours and the chosen reason to one stored correction, or explains what is missing.
+export function planCorrection(before: AttendanceState[], edited: AttendanceState[], reason: CorrectionReason | null, motive: string): CorrectionPlan {
+  if (!reason) return { hint: "Elegí por qué cambia." };
+  let correction: AttendanceCorrection;
+  if (reason === "late") {
+    const arrival = edited.indexOf("present");
+    const isLateArrival = arrival >= 0 && edited.every((state, index) => state === (index < arrival ? "absent" : "present"));
+    if (!isLateArrival) return { hint: "Para «Llegó tarde» dejá en falta las horas antes de que llegara y en presente desde que llegó." };
+    correction = { action: "late", arrivalHour: arrival + 1 };
+  } else if (reason === "excuse") {
+    if (!motive.trim()) return { hint: "Escribí el motivo de la excusa." };
+    correction = { action: "excuse", motive: motive.trim() };
+  } else {
+    correction = { action: "present" };
+  }
+  try {
+    return { correction, after: applyCorrection(before, correction) };
+  } catch {
+    return { hint: "Esta corrección no cambia ninguna hora." };
+  }
+}
+
+// "15:00" and hour index 1 -> "16:00–17:00"; empty when the start time is not HH:MM.
+export function hourRangeLabel(startTime: string, index: number): string {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(startTime.trim());
+  if (!match) return "";
+  const start = Number(match[1]) * 60 + Number(match[2]) + index * 60;
+  return `${formatTime(start)}–${formatTime(start + 60)}`;
+}
+
 // S1: tapping a name marks every hour absent, or all present again when the student was already fully absent.
 export function toggleStudent(states: AttendanceState[]): AttendanceState[] {
   const next = states.includes("present") ? "absent" : "present";

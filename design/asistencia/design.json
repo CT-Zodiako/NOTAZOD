@@ -22,6 +22,13 @@
       "tradeoff": "Students × dates grid in an 'Asistencia' tab: absences per cell with heat color, justified striped, corrected cells marked; click a cell to correct. Most complete overview; gets wide after many classes (scrolls horizontally).",
       "width": 1280,
       "height": 860
+    },
+    {
+      "file": "04-corregir-tocando-horas.html",
+      "title": "Corregir tocando las horas",
+      "tradeoff": "Correction works like taking the roll: tap each hour (with its real time) to toggle F/✓, one-tap shortcuts (vino toda la clase, llegó en la 2.ª/3.ª hora), a required '¿Por qué cambia?' (llegó tarde, tiene excusa, error de lista) and a big Antes → Ahora. Clearer than picking an abstract option first; slightly more on screen.",
+      "width": 1280,
+      "height": 860
     }
   ]
 }
