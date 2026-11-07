@@ -85,3 +85,28 @@ test("Spanish weekday names, short labels and HH:MM", () => {
   assert.equal(formatTime(480), "08:00");
   assert.equal(formatTime(1050), "17:30");
 });
+
+test("parse: end equal to start, en dash, trailing semicolon, unknown words", () => {
+  assert.deepEqual(parseSchedule("LUN 10:00-10:00"), []);
+  assert.deepEqual(parseSchedule("LUN 10:00–12:00;"), [{ day: 1, start: 600, end: 720 }]);
+  assert.deepEqual(parseSchedule("LUNES 10:00-12:00; MIE 15:30-18:00 Sala 3; LUN 10:00-12:00, MAR 10:00-12:00"), []);
+});
+
+test("next class: a class in progress is skipped; Sunday wraps to Monday", () => {
+  const courses = [course("web", "Web", [{ schedule: "LUN 13:00-15:00; MIE 15:30-18:00" }])];
+  assert.equal(nextClassLabel(nextClass(courses, at(2, 14))!), "Próxima clase · miércoles 15:30");
+  assert.deepEqual([nextClass(courses, at(8, 10))?.slot.day, nextClass(courses, at(8, 10))?.daysAhead], [1, 1]);
+});
+
+test("next class: the same weekday next week says so instead of reading like today", () => {
+  const courses = [course("web", "Web", [{ schedule: "LUN 13:00-15:00" }])];
+  const next = nextClass(courses, at(2, 13, 30))!;
+  assert.equal(next.daysAhead, 7);
+  assert.equal(nextClassLabel(next), "Próxima clase · el próximo lunes 13:00");
+});
+
+test("week: different courses at the same time both appear, sorted by name; Sat+Dom order", () => {
+  const week = buildWeek([course("b", "B", [{ schedule: "LUN 10:00-12:00" }]), course("a", "A", [{ schedule: "LUN 10:00-12:00" }])]);
+  assert.deepEqual(week[0].slots.map((slot) => slot.courseId), ["a", "b"]);
+  assert.deepEqual(buildWeek([course("a", "A", [{ schedule: "SAB 8:00-9:00; DOM 8:00-9:00" }])]).map((column) => column.day), [1, 2, 3, 4, 5, 6, 0]);
+});

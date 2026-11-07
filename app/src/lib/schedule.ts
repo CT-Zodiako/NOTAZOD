@@ -85,5 +85,8 @@ export function nextClass(courses: ScheduleCourse[], now: Date): NextClass | nul
 
 export function nextClassLabel(next: NextClass): string {
   const time = formatTime(next.slot.start);
-  return `Próxima clase · ${next.daysAhead === 0 ? time : `${weekdayName(next.slot.day)} ${time}`}`;
+  if (next.daysAhead === 0) return `Próxima clase · ${time}`;
+  // Seven days ahead is today's weekday again; say "el próximo" so it does not read like today.
+  const day = next.daysAhead === 7 ? `el próximo ${weekdayName(next.slot.day)}` : weekdayName(next.slot.day);
+  return `Próxima clase · ${day} ${time}`;
 }
