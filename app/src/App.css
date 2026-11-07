@@ -35,16 +35,11 @@ body { margin: 0; min-width: 320px; background: var(--color-surface-default); co
 :root[data-mantine-color-scheme="dark"] .app-header { background: var(--color-surface-raised); }
 button, input { font: inherit; }
 .app-header { border-bottom: var(--borderWidth-thin) solid var(--color-border-subtle); background: var(--color-surface-default); }
-.header-inner { height: 100%; display: flex; align-items: center; justify-content: space-between; }
+.header-inner { height: 100%; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .brand-logo { width: 132px; height: 36px; object-fit: contain; object-position: left center; }
 .app-footer { display: flex; align-items: center; justify-content: center; gap: var(--space-2); padding: var(--space-4) var(--space-5); border-top: var(--borderWidth-thin) solid var(--color-border-subtle); }
 .update-notes { white-space: pre-wrap; max-height: 220px; overflow-y: auto; }
 .reminder-strip { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--color-surface-subtle); }
-.course-list { background: var(--color-surface-raised); border: var(--borderWidth-thin) solid var(--color-border-subtle); border-radius: var(--radius-md); }
-.course-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 2fr) auto; gap: var(--space-6); align-items: center; padding: var(--space-6); border-bottom: var(--borderWidth-thin) solid var(--color-border-subtle); }
-.course-row:last-child { border-bottom: 0; }
-.course-summary, .course-group { min-width: 0; overflow-wrap: anywhere; }
-.course-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
 .app-footer { margin-inline-start: var(--app-shell-navbar-offset, 0px); }
 
 /* Course view: sidebar, header and heat-map table (design/lista-estudiantes/03-panel-mapa-calor.html) */
@@ -115,5 +110,31 @@ button, input { font: inherit; }
 .campus-different { --campus-color: var(--color-feedback-warning); }
 .heat-legend { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-3) 0 0; font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .heat-legend span { display: inline-block; width: 160px; height: 8px; border-radius: var(--radius-full); background: linear-gradient(90deg, color-mix(in srgb, var(--color-grade-failing) 55%, transparent), color-mix(in srgb, var(--color-grade-failing) 10%, transparent) 60%, color-mix(in srgb, var(--color-grade-passing) 10%, transparent) 60%, color-mix(in srgb, var(--color-grade-passing) 55%, transparent)); }
-@media (max-width: 800px) { .course-row { grid-template-columns: minmax(0, 1fr); } }
-@media (max-width: 480px) { .course-groups { grid-template-columns: minmax(0, 1fr); } }
+
+/* Home agenda (design/inicio-cursos/03-agenda-semana.html): title, next class banner, week and compact course list */
+.home-menu .action-icon { color: var(--color-text-muted); }
+.home-title { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.home-title h1 { font-size: var(--font-size-lg); line-height: var(--font-lineHeight-tight); }
+.home-empty { padding: var(--space-6); border: var(--borderWidth-thin) dashed var(--color-border-subtle); border-radius: var(--radius-md); background: var(--color-surface-raised); text-align: center; }
+.home-dot { flex: none; width: 10px; height: 10px; border-radius: var(--radius-full); background: var(--course-color); }
+.home-next { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) 14px; border: var(--borderWidth-thin) solid var(--course-color); border-radius: var(--radius-md); background: color-mix(in srgb, var(--course-color) 14%, var(--color-surface-raised)); }
+.home-next-body { flex: 1; min-width: 0; }
+.home-next-body b { display: block; font-size: var(--font-size-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home-next-label { font-size: var(--font-size-xs); font-weight: var(--font-weight-bold); text-transform: uppercase; letter-spacing: 0.04em; color: var(--course-color); }
+.home-week { display: grid; grid-template-columns: repeat(var(--week-columns, 5), minmax(0, 1fr)); gap: var(--space-2); }
+.home-day { min-width: 0; }
+.home-day h3 { margin: 0 0 6px; font-size: var(--font-size-xs); font-weight: var(--font-weight-bold); text-transform: uppercase; letter-spacing: 0.04em; text-align: center; color: var(--color-text-muted); }
+.home-day[data-today] h3 { color: var(--color-action-primary); }
+.home-slot { display: block; width: 100%; min-width: 0; margin-bottom: 6px; padding: 6px; border: 0; border-left: 3px solid var(--course-color); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--course-color) 16%, var(--color-surface-raised)); color: var(--color-text-default); font-size: 12px; line-height: var(--font-lineHeight-tight); text-align: left; cursor: pointer; }
+.home-slot:hover { background: color-mix(in srgb, var(--course-color) 26%, var(--color-surface-raised)); }
+.home-slot b { display: block; font-weight: var(--font-weight-bold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home-slot span { display: block; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home-heading { margin: 0 0 var(--space-2); font-size: var(--font-size-xs); font-weight: var(--font-weight-bold); text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-muted); }
+.home-subheading { margin: 0 0 6px; font-size: var(--font-size-xs); font-weight: var(--font-weight-bold); color: var(--color-text-muted); }
+.home-courses { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.home-course { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: var(--space-2) 10px; border: var(--borderWidth-thin) solid var(--color-border-subtle); border-radius: var(--radius-sm); background: var(--color-surface-raised); color: var(--color-text-default); text-align: left; cursor: pointer; }
+.home-course:hover { border-color: var(--course-color); }
+.home-course b { flex: 1; min-width: 0; font-size: var(--font-size-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home-course small { flex: none; color: var(--color-text-muted); }
+.home-slot:focus-visible, .home-course:focus-visible { outline: var(--borderWidth-focus) solid var(--color-border-focus); outline-offset: 2px; }
+@media (max-width: 480px) { .home-courses { grid-template-columns: minmax(0, 1fr); } }

@@ -3,6 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { check, Update } from "@tauri-apps/plugin-updater";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
+  ActionIcon,
   AppShell,
   Badge,
   Button,
@@ -33,6 +34,7 @@ import { CampusReport, CheckGroup, openCampusWindow, readCampusCourses, runCampu
 import { currentSemester, planCourseSync, SyncAction } from "./lib/campusSync";
 import { hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
 import { campusStateFor, COURSE_COLOR_SWATCHES, courseColorStyle, countByFilter, hasPendingGrade, heatTint, isAtRisk, matchesFilter, STUDENT_FILTER, StudentFilter, StudentStatus } from "./lib/studentList";
+import { buildWeek, dayLabel, formatTime, nextClass, nextClassLabel, weekdayName } from "./lib/schedule";
 
 const studentFilterOptions: { key: StudentFilter; label: string; description: string }[] = [
   { key: STUDENT_FILTER.ALL, label: "Todos", description: "Todos los estudiantes del corte" },
@@ -41,7 +43,7 @@ const studentFilterOptions: { key: StudentFilter; label: string; description: st
   { key: STUDENT_FILTER.CAMPUS, label: "Sin subir", description: "Sin subir al Campus (último Verificar Campus)" },
 ];
 
-// Outline icons (24x24, stroke = currentColor) for the sidebar global actions.
+// Outline icons (24x24, stroke = currentColor) for the global actions (course sidebar and home ⋯ menu).
 const ICON_PATHS = {
   plus: "M12 5v14M5 12h14",
   sync: "M21 12a9 9 0 0 1-15.5 6.2L3 16M3 12a9 9 0 0 1 15.5-6.2L21 8M21 3v5h-5M3 21v-5h5",
@@ -53,6 +55,8 @@ const ICON_PATHS = {
   code: "M16 18l6-6-6-6M8 6l-6 6 6 6",
   sun: "M12 8a4 4 0 1 0 0 8 4 4 0 1 0 0-8M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4",
   moon: "M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z",
+  dots: "M4 12a1 1 0 1 0 2 0 1 1 0 1 0-2 0M11 12a1 1 0 1 0 2 0 1 1 0 1 0-2 0M18 12a1 1 0 1 0 2 0 1 1 0 1 0-2 0",
+  chevronRight: "m9 18 6-6-6-6",
 } as const;
 
 function Icon({ name, size = 16 }: { name: keyof typeof ICON_PATHS; size?: number }) {
@@ -176,6 +180,15 @@ function App() {
   const [studentFilter, setStudentFilter] = useState<StudentFilter>(STUDENT_FILTER.ALL);
   // Result of the last "Verificar Campus" run in this session; null until one finishes.
   const [campusCheckResult, setCampusCheckResult] = useState<CheckGroup[] | null>(null);
+  // Clock for the home agenda ("Hoy, …", Próxima clase); ticks only while the home screen is shown.
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    if (selectedCourse) return;
+    setNow(new Date());
+    const timer = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(timer);
+  }, [selectedCourse]);
 
   useEffect(() => {
     initDatabase()
@@ -1018,6 +1031,26 @@ function App() {
     );
   }
 
+  // Home agenda (S2-S5): current-semester courses feed the banner, the week and the main list.
+  const homeSemester = currentSemester(now);
+  const homeCourses = courses.filter((course) => course.semester === homeSemester);
+  const homeWeek = buildWeek(homeCourses);
+  const otherSemesters = [...new Set(courses.map((course) => course.semester))].filter((semesterName) => semesterName !== homeSemester).sort().reverse();
+  const studentCountLabel = (count: number) => `${count} ${count === 1 ? "estudiante" : "estudiantes"}`;
+  const renderHomeCourses = (list: Course[]) => (
+    <nav className="home-courses" aria-label="Cursos">
+      {list.map((course) => (
+        <Tooltip key={course.id} label={course.name} openDelay={300} withinPortal>
+          <button type="button" className="home-course" style={courseColorStyle(course.color) as CSSProperties} aria-label={`${course.name}, ${studentCountLabel(course.students)}`} onClick={() => void openCourse(course)}>
+            <span className="home-dot" aria-hidden="true" />
+            <b>{course.name}</b>
+            <small>{course.students}</small>
+          </button>
+        </Tooltip>
+      ))}
+    </nav>
+  );
+
   const darkTheme = colorScheme === "dark";
   const themeSwitch = (
     <Switch
@@ -1095,16 +1128,24 @@ function App() {
       ) : (
       <AppShell.Header className="app-header">
         <Container size="xl" fluid className="header-inner">
-          <Group gap="xs">
-            <img className="brand-logo" src="/branding/notazod-logo.png" alt="NOTAZOD" />
-          </Group>
-          <Group gap="xs">
-            <Button variant="light" color="green" size="xs" onClick={() => void openCampusWindow()} aria-label="Abrir el Campus de Unimayor en una ventana de NOTAZOD">Abrir Campus</Button>
-            <Button variant="subtle" size="xs" onClick={() => void handleExportBackup()} aria-label="Exportar copia de seguridad de NOTAZOD">Exportar copia de seguridad</Button>
-            <Button variant="subtle" size="xs" onClick={() => void handleRestoreBackup()} aria-label="Restaurar copia de seguridad de NOTAZOD">Restaurar copia de seguridad</Button>
-            <Button variant="subtle" size="xs" onClick={() => void checkForUpdates()} aria-label="Buscar actualizaciones de NOTAZOD">Buscar actualizaciones</Button>
-            <Button variant="subtle" size="xs" onClick={() => void openUrl("https://github.com/CT-Zodiako/NOTAZOD")} aria-label="Abrir repositorio de NOTAZOD en GitHub">GitHub</Button>
+          <img className="brand-logo" src="/branding/notazod-logo.png" alt="NOTAZOD" />
+          <Group gap="xs" wrap="nowrap">
             {themeSwitch}
+            <Menu shadow="md" width={260} position="bottom-end">
+              <Menu.Target>
+                <ActionIcon variant="subtle" color="gray" size="lg" aria-label="Más opciones"><Icon name="dots" /></ActionIcon>
+              </Menu.Target>
+              <Menu.Dropdown className="home-menu">
+                <Menu.Item leftSection={<Icon name="external" />} onClick={() => void openCampusWindow()} aria-label="Abrir el Campus de Unimayor en una ventana de NOTAZOD">Abrir Campus</Menu.Item>
+                <Menu.Item leftSection={<Icon name="check" />} onClick={openCampusCheck}>Verificar Campus</Menu.Item>
+                <Menu.Divider />
+                <Menu.Item leftSection={<Icon name="download" />} onClick={() => void handleExportBackup()} aria-label="Exportar copia de seguridad de NOTAZOD">Exportar copia de seguridad</Menu.Item>
+                <Menu.Item leftSection={<Icon name="upload" />} onClick={() => void handleRestoreBackup()} aria-label="Restaurar copia de seguridad de NOTAZOD">Restaurar copia de seguridad</Menu.Item>
+                <Menu.Divider />
+                <Menu.Item leftSection={<Icon name="clock" />} onClick={() => void checkForUpdates()} aria-label="Buscar actualizaciones de NOTAZOD">Buscar actualizaciones</Menu.Item>
+                <Menu.Item leftSection={<Icon name="code" />} onClick={() => void openUrl("https://github.com/CT-Zodiako/NOTAZOD")} aria-label="Abrir repositorio de NOTAZOD en GitHub">Ver proyecto en GitHub</Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
           </Group>
         </Container>
       </AppShell.Header>
@@ -1113,39 +1154,88 @@ function App() {
         <Container size="xl" fluid>
           <Stack gap="md">
             {!selectedCourse ? (
-              <Group justify="space-between" align="flex-end">
-                <div><Title order={1}>Tus cursos</Title><Text c="dimmed" mt="xs">Consultá tus grupos, horarios y estudiantes en un solo lugar.</Text></div>
-                <Group><Button variant="light" color="green" onClick={openCourseSync}>Sincronizar cursos</Button><Button variant="light" color="teal" onClick={openCampusCheck}>Verificar Campus</Button><Button onClick={() => setCourseModal(true)}>Crear curso</Button></Group>
-              </Group>
+              <div className="home-title">
+                <Title order={1}>Hoy, {weekdayName(now.getDay())}</Title>
+                <Group gap="xs">
+                  <Button variant="default" leftSection={<Icon name="sync" />} onClick={openCourseSync}>Sincronizar cursos</Button>
+                  <Button leftSection={<Icon name="plus" />} onClick={() => setCourseModal(true)}>Crear curso</Button>
+                </Group>
+              </div>
             ) : null}
             {error ? <Text c="red" role="alert">{error}</Text> : null}
             {backupMessage ? <Text c={backupMessage.type === "success" ? "green" : "red"} role="status">{backupMessage.text}</Text> : null}
             {restoreMessage ? <Text c={restoreMessage.type === "success" ? "green" : "red"} role="status">{restoreMessage.text}</Text> : null}
             {loading ? <Text c="dimmed">Cargando tus cursos…</Text> : null}
             {!selectedCourse ? (
-              <section className="course-list" aria-label="Cursos">
-                {courses.map((course) => (
-                  <article key={course.id} className="course-row">
-                    <div className="course-summary">
-                      <Group justify="space-between" align="flex-start" wrap="nowrap">
-                        <Title order={2} size="h3">{course.name}</Title>
-                        <Badge variant="light">{course.semester}</Badge>
-                      </Group>
-                      <Text c="dimmed" size="sm" mt="xs">{course.students} {course.students === 1 ? "estudiante" : "estudiantes"}</Text>
-                    </div>
-                    <div className="course-groups">
-                      {course.campusGroups?.map((group) => (
-                        <div key={group.key} className="course-group">
-                          <Text size="sm" fw={700}>{group.group}</Text>
-                          <Text size="sm">{group.program || "—"}</Text>
-                          <Text size="sm">{group.schedule || "—"} · {group.room || "—"}</Text>
+              loading ? null : courses.length === 0 ? (
+                <div className="home-empty">
+                  <Text fw={700}>Todavía no tenés cursos.</Text>
+                  <Text c="dimmed" size="sm">Usá Sincronizar cursos para traerlos del Campus o Crear curso para empezar uno.</Text>
+                </div>
+              ) : (() => {
+                const nextSlot = nextClass(homeCourses, now);
+                const nextCourse = nextSlot ? homeCourses.find((course) => course.id === nextSlot.slot.courseId) : undefined;
+                return (
+                  <>
+                    {nextSlot && nextCourse ? (
+                      <section className="home-next" aria-label="Próxima clase" style={courseColorStyle(nextCourse.color) as CSSProperties}>
+                        <span className="home-dot" aria-hidden="true" />
+                        <div className="home-next-body">
+                          <span className="home-next-label">{nextClassLabel(nextSlot)}</span>
+                          <b>{nextCourse.name}</b>
+                          <Text c="dimmed" size="sm" truncate>{[nextSlot.slot.group, nextSlot.slot.room, studentCountLabel(nextCourse.students)].filter(Boolean).join(" · ")}</Text>
                         </div>
+                        <Button rightSection={<Icon name="chevronRight" />} onClick={() => void openCourse(nextCourse)}>Abrir curso</Button>
+                      </section>
+                    ) : (
+                      <section className="home-next" aria-label="Próxima clase" style={courseColorStyle("primary") as CSSProperties}>
+                        <span className="home-dot" aria-hidden="true" />
+                        <div className="home-next-body">
+                          <span className="home-next-label">Próxima clase</span>
+                          <Text c="dimmed" size="sm">Los horarios de tus cursos llegan del Campus con Sincronizar cursos.</Text>
+                        </div>
+                      </section>
+                    )}
+                    <div className="home-week" style={{ "--week-columns": homeWeek.length } as CSSProperties}>
+                      {homeWeek.map((column) => (
+                        <section key={column.day} className="home-day" data-today={column.day === now.getDay() || undefined} aria-label={weekdayName(column.day)}>
+                          <h3>{dayLabel(column.day)}</h3>
+                          {column.slots.map((slot) => {
+                            const slotCourse = homeCourses.find((course) => course.id === slot.courseId);
+                            const time = `${formatTime(slot.start)}–${formatTime(slot.end)}`;
+                            return (
+                              <Tooltip key={`${slot.courseId}-${slot.start}-${slot.end}-${slot.room}`} label={[slot.courseName, time, slot.room].filter(Boolean).join(" · ")} openDelay={300} withinPortal>
+                                <button type="button" className="home-slot" style={courseColorStyle(slot.color) as CSSProperties} onClick={() => { if (slotCourse) void openCourse(slotCourse); }}>
+                                  <b>{slot.courseName}</b>
+                                  <span>{time}</span>
+                                  {slot.room ? <span>{slot.room}</span> : null}
+                                </button>
+                              </Tooltip>
+                            );
+                          })}
+                        </section>
                       ))}
                     </div>
-                    <Button variant="outline" onClick={() => openCourse(course)}>Ver estudiantes</Button>
-                  </article>
-                ))}
-              </section>
+                    <section aria-label={`Todos los cursos ${homeSemester}`}>
+                      <h2 className="home-heading">Todos los cursos · {homeSemester}</h2>
+                      {homeCourses.length ? renderHomeCourses(homeCourses) : <Text c="dimmed" size="sm">No hay cursos del semestre {homeSemester}.</Text>}
+                    </section>
+                    {otherSemesters.length ? (
+                      <section aria-label="Otros semestres">
+                        <h2 className="home-heading">Otros semestres</h2>
+                        <Stack gap="sm">
+                          {otherSemesters.map((semesterName) => (
+                            <div key={semesterName}>
+                              <p className="home-subheading">{semesterName}</p>
+                              {renderHomeCourses(courses.filter((course) => course.semester === semesterName))}
+                            </div>
+                          ))}
+                        </Stack>
+                      </section>
+                    ) : null}
+                  </>
+                );
+              })()
             ) : (
               <Stack gap="md">
                 <div className="course-header">
