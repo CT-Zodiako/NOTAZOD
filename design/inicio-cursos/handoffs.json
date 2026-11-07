@@ -3,12 +3,12 @@
   "chosen": "03-agenda-semana.html",
   "handoffs": {
     "03-agenda-semana.html": {
-      "status": "in_progress",
+      "status": "implemented",
       "queued": false,
       "sentAt": "2026-11-07T01:04:48.998Z",
       "startedAt": "2026-11-07T01:04:56.005Z",
-      "implementedAt": null,
-      "note": "Starting on branch feature/home-agenda in NOTAZOD Test."
+      "implementedAt": "2026-11-07T01:11:14.150Z",
+      "note": "b4bd48c on feature/home-agenda; installed as NOTAZOD Test (Tauri app, no loopback preview). Visual check pending by the user."
     }
   }
 }
