@@ -274,7 +274,7 @@ async fn campus_open(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(CAMPUS_WINDOW) {
         let _ = window.unminimize();
         window.show().map_err(|error| error.to_string())?;
-        tile_with_campus(&app, &window);
+        tile_with_campus(&app, &window).await;
         window.set_focus().map_err(|error| error.to_string())?;
         return Ok(());
     }
@@ -287,7 +287,7 @@ async fn campus_open(app: tauri::AppHandle) -> Result<(), String> {
         .on_navigation(|url| is_campus_url(url) || url.scheme() == "about")
         .build()
         .map_err(|error| error.to_string())?;
-    tile_with_campus(&app, &window);
+    tile_with_campus(&app, &window).await;
     let _ = window.set_focus();
     Ok(())
 }
@@ -298,19 +298,28 @@ fn split_halves(x: i32, y: i32, width: u32, height: u32) -> ((i32, i32, u32, u32
     ((x, y, left, height), (x + left as i32, y, width - left, height))
 }
 
-// Fills the screen NOTAZOD is on: NOTAZOD on the left half, the Campus on the right half, so the
-// Campus window never opens hidden behind the app. Best effort: a failure leaves the windows as they are.
-fn tile_with_campus(app: &tauri::AppHandle, campus: &tauri::WebviewWindow) {
+// Fills the screen NOTAZOD is on: NOTAZOD on the left half, the Campus on the right half, both in
+// front, so neither window opens hidden behind other apps. Best effort: a failure leaves the windows as they are.
+async fn tile_with_campus(app: &tauri::AppHandle, campus: &tauri::WebviewWindow) {
     use tauri::{Manager, PhysicalPosition, PhysicalSize};
 
     let Some(main) = app.get_webview_window("main") else { return };
+    // Leaving macOS full screen is animated and moves the window to another Space; resizing before it
+    // ends is lost, so wait for the animation when either window was in full screen.
+    let was_fullscreen = [&main, campus].iter().any(|window| window.is_fullscreen().unwrap_or(false));
+    for window in [&main, campus] {
+        let _ = window.set_fullscreen(false);
+        let _ = window.unmaximize();
+        let _ = window.unminimize();
+        let _ = window.show();
+    }
+    if was_fullscreen {
+        let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(std::time::Duration::from_millis(900))).await;
+    }
     let Ok(Some(monitor)) = main.current_monitor() else { return };
     let area = monitor.work_area();
     let (left, right) = split_halves(area.position.x, area.position.y, area.size.width, area.size.height);
     for (window, (x, y, width, height)) in [(&main, left), (campus, right)] {
-        let _ = window.set_fullscreen(false);
-        let _ = window.unmaximize();
-        let _ = window.unminimize();
         // set_size sets the inner size; subtract the title bar and borders so the outer frame fits.
         let (Ok(outer), Ok(inner)) = (window.outer_size(), window.inner_size()) else { continue };
         let frame_w = outer.width.saturating_sub(inner.width);
@@ -318,6 +327,8 @@ fn tile_with_campus(app: &tauri::AppHandle, campus: &tauri::WebviewWindow) {
         let _ = window.set_position(PhysicalPosition::new(x, y));
         let _ = window.set_size(PhysicalSize::new(width.saturating_sub(frame_w), height.saturating_sub(frame_h)));
     }
+    // Raise NOTAZOD first; the caller then focuses the Campus, so both end up above other apps.
+    let _ = main.set_focus();
 }
 
 // Evaluates a synchronous script in the Campus window and returns its JSON-serialized result.
