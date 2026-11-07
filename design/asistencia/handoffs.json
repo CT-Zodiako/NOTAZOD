@@ -11,12 +11,12 @@
       "note": "11a8f5f (db) + 91f0e9b (UI) on feature/attendance; installed in NOTAZOD Test. Visual check pending by the user."
     },
     "04-corregir-tocando-horas.html": {
-      "status": "in_progress",
+      "status": "implemented",
       "queued": false,
       "sentAt": "2026-11-07T03:34:12.365Z",
       "startedAt": "2026-11-07T03:34:26.913Z",
-      "implementedAt": null,
-      "note": "Rewriting CorrectionForm on feature/attendance; db API unchanged."
+      "implementedAt": "2026-11-07T03:37:48.066Z",
+      "note": "be6b403 on feature/attendance; review approved; installed in NOTAZOD Test (Tauri app, no loopback preview). Visual check pending."
     }
   }
 }
