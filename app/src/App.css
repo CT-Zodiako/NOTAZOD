@@ -193,4 +193,11 @@ button.attendance-hour:focus-visible, .roll-name:focus-visible, .attendance-sess
 .correction-compare > div { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); }
 .correction-compare-label { font-size: var(--font-size-xs); color: var(--color-text-muted); text-transform: uppercase; letter-spacing: .04em; }
 .correction-compare-arrow { font-size: var(--font-size-lg); color: var(--color-text-muted); }
+/* Roll call one student at a time, like Calificar */
+.roll-walk { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-4); border: var(--borderWidth-thin) solid var(--color-border-subtle); border-radius: var(--radius-md); background: var(--color-surface-raised); outline: none; }
+.roll-progress { display: flex; flex-wrap: wrap; gap: 4px; margin-top: var(--space-2); }
+.roll-progress span { width: 10px; height: 10px; border-radius: var(--radius-full); background: var(--color-surface-subtle); border: var(--borderWidth-thin) solid var(--color-border-subtle); }
+.roll-progress span[data-tone="passing"] { background: var(--color-grade-passing); border-color: var(--color-grade-passing); }
+.roll-progress span[data-tone="failing"] { background: var(--color-grade-failing); border-color: var(--color-grade-failing); }
+.roll-progress span[data-current] { outline: var(--borderWidth-focus) solid var(--color-border-focus); outline-offset: 1px; }
 

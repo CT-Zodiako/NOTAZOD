@@ -36,7 +36,7 @@ import { currentSemester, planCourseSync, SyncAction } from "./lib/campusSync";
 import { hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
 import { campusStateFor, COURSE_COLOR_SWATCHES, courseColorStyle, countByFilter, hasPendingGrade, heatTint, isAtRisk, matchesFilter, STUDENT_FILTER, StudentFilter, StudentStatus } from "./lib/studentList";
 import { buildWeek, dayLabel, formatTime, nextClass, nextClassLabel, weekdayName } from "./lib/schedule";
-import { absenceLabel, AttendanceState, CorrectionReason, hourRangeLabel, planCorrection, toggleCorrectionHour, courseTotalLabel, defaultSessionTiming, describeHistoryEntry, formatSessionDate, isValidSessionHours, MAX_SESSION_HOURS, MIN_SESSION_HOURS, resizeStates, rollCallDefaults, rollCallSummary, sessionLabel, stateCounts, toggleHour, toggleStudent } from "./lib/attendance";
+import { absenceLabel, AttendanceState, CorrectionReason, hourRangeLabel, lateArrivalStates, planCorrection, toggleCorrectionHour, courseTotalLabel, defaultSessionTiming, describeHistoryEntry, formatSessionDate, isValidSessionHours, MAX_SESSION_HOURS, MIN_SESSION_HOURS, resizeStates, rollCallDefaults, rollCallSummary, sessionLabel, stateCounts, toggleHour, toggleStudent } from "./lib/attendance";
 
 const studentFilterOptions: { key: StudentFilter; label: string; description: string }[] = [
   { key: STUDENT_FILTER.ALL, label: "Todos", description: "Todos los estudiantes del corte" },
@@ -1676,39 +1676,94 @@ function RollCallForm({ courseId, schedules, students, onCancel, onSaved }: { co
     }
   }
 
+  // Like Calificar: one student at a time ("Estudiante N de M"), Asistió / No asistió move on; the last step is the review list.
+  const [step, setStep] = useState(0);
+  const reviewing = step >= students.length;
+  const current = students[step];
+
+  function mark(states: AttendanceState[]) {
+    if (!current) return;
+    setStates((all) => ({ ...all, [current.id]: states }));
+    setStep((value) => value + 1);
+  }
+
+  function onKey(event: React.KeyboardEvent) {
+    if (reviewing || !current || (event.target as HTMLElement).tagName === "INPUT") return;
+    const key = event.key.toLowerCase();
+    if (key === "a" || (key === "enter" && !event.shiftKey)) { event.preventDefault(); mark(resizeStates([], hours).map(() => "present")); }
+    else if (key === "n") { event.preventDefault(); mark(resizeStates([], hours).map(() => "absent")); }
+    else if (key === "h" || (key === "enter" && event.shiftKey)) { event.preventDefault(); setStep((value) => Math.max(0, value - 1)); }
+  }
+
+  const currentStates = current ? rows[step] : [];
   return (
-    <Stack gap="sm">
-      <Text c="dimmed" size="sm">Todos empiezan presentes. Tocá el nombre de quien faltó; si llegó tarde, tocá las horas en que no estuvo.</Text>
+    <Stack gap="sm" onKeyDown={onKey}>
       <Group gap="sm" align="flex-end">
         <TextInput label="Fecha" type="date" value={date} onChange={(event) => changeDate(event.currentTarget.value)} required />
         <TextInput label="Hora inicio" type="time" value={startTime} onChange={(event) => { setTimingEdited(true); setStartTime(event.currentTarget.value); }} required />
         <NumberInput label="Horas de clase" min={MIN_SESSION_HOURS} max={MAX_SESSION_HOURS} allowDecimal={false} clampBehavior="strict" value={hours} onChange={changeHours} w={110} />
       </Group>
-      <div className="roll-list" role="list" aria-label="Estudiantes">
-        {students.map((student, index) => {
-          const studentStates = rows[index];
-          const absences = stateCounts(studentStates).absent;
-          return (
-            <div key={student.id} role="listitem" className="roll-row" data-absent={absences ? true : undefined}>
-              <button type="button" className="roll-name" aria-label={`${student.fullName}: ${absences ? "marcar presente" : "marcar falta en todas las horas"}`} onClick={() => setStates((current) => ({ ...current, [student.id]: toggleStudent(studentStates) }))}>
-                <b>{student.fullName}</b><small>{student.code}</small>
-              </button>
-              <span className="attendance-hours">
-                {studentStates.map((state, hourIndex) => (
-                  <button key={hourIndex} type="button" className="attendance-hour" data-state={state} aria-pressed={state === "absent"} aria-label={`${student.fullName}, hora ${hourIndex + 1}: ${hourStateLabels[state]}`} onClick={() => setStates((current) => ({ ...current, [student.id]: toggleHour(studentStates, hourIndex) }))}>{hourStateMarks[state]}</button>
-                ))}
-              </span>
-              <span className="attendance-pill" data-tone={absences ? "failing" : "passing"}>{absenceLabel(absences)}</span>
-            </div>
-          );
-        })}
-      </div>
+      {!reviewing && current ? (
+        <div className="roll-walk" tabIndex={-1}>
+          <Text c="dimmed">Estudiante {step + 1} de {students.length}</Text>
+          <Title order={3}>{current.fullName}</Title>
+          <Text size="sm" c="dimmed">Código {current.code}</Text>
+          <Group grow gap="sm" mt="sm">
+            <Button size="lg" color="green" leftSection={<Icon name="check" />} onClick={() => mark(currentStates.map(() => "present"))} autoFocus>Asistió <span className="shortcut">Enter · A</span></Button>
+            <Button size="lg" color="red" variant="light" onClick={() => mark(currentStates.map(() => "absent"))}>No asistió <span className="shortcut">N</span></Button>
+          </Group>
+          {hours > 1 ? (
+            <Group gap={6} mt="xs" justify="center">
+              <Text size="sm" c="dimmed">Llegó tarde:</Text>
+              {currentStates.slice(1).map((_, index) => (
+                <Button key={index} size="compact-sm" variant="default" className="correction-shortcut" onClick={() => mark(lateArrivalStates(hours, index + 2))}>
+                  {hourRangeLabel(startTime, index + 1) ? `a las ${hourRangeLabel(startTime, index + 1).split("–")[0]}` : `en la ${index + 2}.ª hora`}
+                </Button>
+              ))}
+            </Group>
+          ) : null}
+          <Group justify="space-between" mt="sm">
+            <Button variant="default" disabled={step === 0} onClick={() => setStep((value) => Math.max(0, value - 1))}>Anterior <span className="shortcut">Shift+Enter · H</span></Button>
+            <Button variant="subtle" onClick={() => setStep(students.length)}>Ver lista completa</Button>
+          </Group>
+          <div className="roll-progress" aria-hidden="true">
+            {students.map((student, index) => {
+              const absent = stateCounts(rows[index]).absent;
+              return <span key={student.id} data-current={index === step || undefined} data-tone={index < step ? (absent ? "failing" : "passing") : undefined} />;
+            })}
+          </div>
+        </div>
+      ) : (
+        <>
+          <Text c="dimmed" size="sm">Revisá la lista antes de guardar. Tocá un nombre para cambiar toda la clase o una hora para cambiar solo esa.</Text>
+          <div className="roll-list" role="list" aria-label="Estudiantes">
+            {students.map((student, index) => {
+              const studentStates = rows[index];
+              const absences = stateCounts(studentStates).absent;
+              return (
+                <div key={student.id} role="listitem" className="roll-row" data-absent={absences ? true : undefined}>
+                  <button type="button" className="roll-name" aria-label={`${student.fullName}: ${absences ? "marcar presente" : "marcar falta en todas las horas"}`} onClick={() => setStates((all) => ({ ...all, [student.id]: toggleStudent(studentStates) }))}>
+                    <b>{student.fullName}</b><small>{student.code}</small>
+                  </button>
+                  <span className="attendance-hours">
+                    {studentStates.map((state, hourIndex) => (
+                      <button key={hourIndex} type="button" className="attendance-hour" data-state={state} aria-pressed={state === "absent"} aria-label={`${student.fullName}, hora ${hourIndex + 1}: ${hourStateLabels[state]}`} onClick={() => setStates((all) => ({ ...all, [student.id]: toggleHour(studentStates, hourIndex) }))}>{hourStateMarks[state]}</button>
+                    ))}
+                  </span>
+                  <span className="attendance-pill" data-tone={absences ? "failing" : "passing"}>{absenceLabel(absences)}</span>
+                </div>
+              );
+            })}
+          </div>
+          {students.length ? <Button variant="subtle" onClick={() => setStep(0)}>Volver a pasar lista desde el primero</Button> : null}
+        </>
+      )}
       {saveError ? <Text c="red" size="sm" role="alert">{saveError}</Text> : null}
       <Group justify="space-between" wrap="wrap">
         <Text size="sm" role="status">{rollCallSummary(rows)}</Text>
         <Group gap="xs">
           <Button variant="default" onClick={onCancel}>Cancelar</Button>
-          <Button leftSection={<Icon name="check" />} loading={saving} disabled={!students.length || !date || !startTime} onClick={() => void save()}>Guardar asistencia</Button>
+          <Button leftSection={<Icon name="check" />} loading={saving} disabled={!students.length || !date || !startTime || !reviewing} onClick={() => void save()}>Guardar asistencia</Button>
         </Group>
       </Group>
     </Stack>
