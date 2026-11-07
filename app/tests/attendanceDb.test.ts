@@ -384,3 +384,32 @@ test("deleteCourse refuses when an attendance key does not cascade, deleting not
   assert.equal(error?.message, "Database schema does not cascade course deletion: attendance_sessions.course_id -> courses");
   assert.deepEqual(snapshot(dbName, all), before);
 });
+
+test("COURSE_CASCADE_KEYS covers every foreign key reachable from courses (S7)", async () => {
+  const dbName = "fk-reach.db"; createPreviousDatabase(dbName); await openDb(dbName);
+  const src = (await import("node:fs")).readFileSync(new URL("../src/lib/db.ts", import.meta.url), "utf8");
+  const listed = [...src.match(/const COURSE_CASCADE_KEYS = \[([\s\S]*?)\];/)[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort();
+  const fks = withConnection(dbName, (c) => c.prepare(`SELECT m.name AS child, f."table" AS parent, m.name || '.' || f."from" || ' -> ' || f."table" AS key FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) f WHERE m.type='table'`).all());
+  const reach = new Set(["courses"]); for (let grew = true; grew;) { grew = false; for (const f of fks) if (reach.has(f.parent) && !reach.has(f.child)) { reach.add(f.child); grew = true; } }
+  assert.deepEqual(listed, fks.filter((f) => reach.has(f.parent)).map((f) => f.key).sort());
+});
+
+for (const [label, hours, marks] of [["malformed JSON", 2, "{bad"], ["a wrong hour count", 2, '{"s1":["present"]}'], ["another course's student", 2, '{"s4":["absent","absent"]}'], ["a duplicate student", 2, '{"s1":["present","present"],"s1":["absent","absent"]}'], ["an invalid state", 2, '{"s1":["present","late"]}'], ["7 hours", 7, "{}"]]) {
+  test(`the roll-call trigger rejects ${label} and writes nothing (S7)`, async () => {
+    const dbName = `trig-${++databases}.db`; createPreviousDatabase(dbName); await openDb(dbName);
+    const before = snapshot(dbName, ATTENDANCE_TABLES);
+    assert.throws(() => withConnection(dbName, (c) => c.prepare("INSERT INTO attendance_roll_calls (session_id, course_id, date, start_time, hours, marks) VALUES ('x','c1','2026-11-05','15:00',?,?)").run(hours, marks)));
+    assert.deepEqual(snapshot(dbName, ATTENDANCE_TABLES), before);
+  });
+}
+
+test("the history trigger rejects stale before_states and short after_states, and history cannot be updated (S5, S7)", async () => {
+  const { dbName, session } = await seeded();
+  const ins = (before, after) => withConnection(dbName, (c) => c.prepare("INSERT INTO attendance_history (id, session_id, student_id, action, before_states, after_states) VALUES (?, ?, 's1', 'late', ?, ?)").run(crypto.randomUUID(), session.id, before, after));
+  const before = snapshot(dbName, ATTENDANCE_TABLES);
+  assert.throws(() => ins('["present","absent","absent"]', '["absent","present","present"]'), /changed since it was read/);
+  assert.throws(() => ins('["absent","absent","absent"]', '["present"]'), /NOT NULL/);
+  assert.deepEqual(snapshot(dbName, ATTENDANCE_TABLES), before);
+  ins('["absent","absent","absent"]', '["absent","present","present"]');
+  assert.throws(() => withConnection(dbName, (c) => c.exec("UPDATE attendance_history SET motive = 'x'")), /cannot be changed/);
+});
