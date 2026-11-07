@@ -138,3 +138,44 @@ button, input { font: inherit; }
 .home-course small { flex: none; color: var(--color-text-muted); }
 .home-slot:focus-visible, .home-course:focus-visible { outline: var(--borderWidth-focus) solid var(--color-border-focus); outline-offset: 2px; }
 @media (max-width: 480px) { .home-courses { grid-template-columns: minmax(0, 1fr); } }
+
+/* Attendance (design/asistencia/01-pestana-sesiones.html): roll call, sessions view and corrections */
+.attendance-hours { display: inline-flex; gap: var(--space-1); }
+.attendance-hour { --hour-color: var(--color-grade-passing); display: inline-grid; place-items: center; width: 30px; height: 24px; padding: 0; border: var(--borderWidth-thin) solid var(--color-border-subtle); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--hour-color) 12%, var(--color-surface-raised)); color: var(--hour-color); font-size: 12px; font-weight: var(--font-weight-bold); }
+.attendance-hour[data-state="absent"] { --hour-color: var(--color-grade-failing); background: color-mix(in srgb, var(--hour-color) 18%, var(--color-surface-raised)); border-color: color-mix(in srgb, var(--hour-color) 40%, var(--color-border-subtle)); }
+.attendance-hour[data-state="justified"] { --hour-color: var(--color-grade-locked); background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--hour-color) 18%, transparent) 0 5px, transparent 5px 10px); }
+button.attendance-hour { cursor: pointer; }
+button.attendance-hour:focus-visible, .roll-name:focus-visible, .attendance-sessions button:focus-visible, .attendance-option:focus-within { outline: var(--borderWidth-focus) solid var(--color-border-focus); outline-offset: 2px; }
+.attendance-pill { --pill-color: var(--color-text-muted); display: inline-flex; align-items: center; border-radius: var(--radius-full); padding: 2px var(--space-2); font-size: 12px; font-weight: var(--font-weight-bold); white-space: nowrap; color: var(--pill-color); background: color-mix(in srgb, var(--pill-color) 15%, transparent); }
+.attendance-pill[data-tone="failing"] { --pill-color: var(--color-grade-failing); }
+.attendance-pill[data-tone="passing"] { --pill-color: var(--color-grade-passing); }
+.attendance-pill[data-tone="locked"] { --pill-color: var(--color-grade-locked); }
+.roll-list { display: flex; flex-direction: column; max-height: 52vh; overflow-y: auto; border: var(--borderWidth-thin) solid var(--color-border-subtle); border-radius: var(--radius-md); }
+.roll-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 6px 10px; border-bottom: var(--borderWidth-thin) solid var(--color-border-subtle); }
+.roll-row:last-child { border-bottom: 0; }
+.roll-row[data-absent] { background: color-mix(in srgb, var(--color-grade-failing) 8%, var(--color-surface-raised)); }
+.roll-name { min-width: 0; padding: 0; border: 0; background: none; color: var(--color-text-default); text-align: left; cursor: pointer; }
+.roll-name b { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.roll-name small, .attendance-student small, .attendance-sessions small { display: block; color: var(--color-text-muted); font-size: 12px; }
+.roll-name:hover b { color: var(--color-action-primary); }
+.attendance-count { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin: 0 0 var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.attendance-split { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 14px; align-items: start; }
+.attendance-sessions { display: flex; flex-direction: column; gap: 6px; }
+.attendance-sessions button { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 10px; border: var(--borderWidth-thin) solid var(--color-border-subtle); border-radius: var(--radius-md); background: var(--color-surface-raised); color: var(--color-text-default); text-align: left; cursor: pointer; }
+.attendance-sessions button:hover { border-color: var(--color-border-default); }
+.attendance-sessions button[aria-pressed="true"] { border-color: var(--color-action-primary); background: color-mix(in srgb, var(--color-action-primary) 10%, var(--color-surface-raised)); }
+.attendance-sessions b { display: block; }
+.attendance-table td { vertical-align: middle; }
+.attendance-student b { display: block; font-weight: var(--font-weight-medium); }
+.attendance-total { font-weight: var(--font-weight-bold); }
+.attendance-legend { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) 6px; margin: var(--space-3) 0 0; font-size: 12px; color: var(--color-text-muted); }
+.attendance-legend .attendance-hour:not(:first-child) { margin-left: var(--space-2); }
+.attendance-options { display: grid; gap: var(--space-2); }
+.attendance-option { display: flex; align-items: flex-start; gap: 10px; padding: 10px; border: var(--borderWidth-thin) solid var(--color-border-subtle); border-radius: var(--radius-md); cursor: pointer; }
+.attendance-option > span { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.attendance-option:hover, .attendance-option[data-selected] { border-color: var(--color-action-primary); background: color-mix(in srgb, var(--color-action-primary) 8%, var(--color-surface-raised)); }
+.attendance-option input { margin-top: 3px; accent-color: var(--color-action-primary); }
+.attendance-history-label { display: flex; align-items: center; gap: 6px; margin: var(--space-1) 0 0; }
+.attendance-history { margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--color-text-muted); border-top: var(--borderWidth-thin) solid var(--color-border-subtle); }
+.attendance-history li { padding: 6px 0; border-bottom: var(--borderWidth-thin) dashed var(--color-border-subtle); }
+@media (max-width: 760px) { .attendance-split { grid-template-columns: minmax(0, 1fr); } }

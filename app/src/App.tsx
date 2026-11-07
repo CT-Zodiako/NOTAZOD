@@ -24,17 +24,19 @@ import {
   Switch,
   Table,
   Text,
+  Textarea,
   TextInput,
   Title,
   Tooltip,
   useMantineColorScheme,
 } from "@mantine/core";
-import { assignStudentToGroup, copyGroupsFromPeriod, Course, COURSE_COLORS, CourseColor, setCourseColor, createCourse, createGradeItem, createGroup, createStudent, deleteCourse, deleteGrade, applyCourseSync, deleteGradeItem, deleteGroup, exportBackup, loadSyncCourses, SyncResult, Grade, GradeHistoryEntry, GradeItem, Group as StudentGroup, GroupMembership, initDatabase, listCourses, listGradeHistory, listGradeItems, listGrades, listGroupMemberships, listGroups, listPeriods, listStudents, Period, renameGradeItem, renameGroup, saveGrade, saveGroupGrade, setPeriodClosed, stageRestore, Student, undoLastGrade, updatePeriod } from "./lib/db";
+import { assignStudentToGroup, AttendanceHistoryEntry, AttendanceMark, AttendanceSession, AttendanceTotal, copyGroupsFromPeriod, correctAttendance, courseAttendanceTotals, Course, createAttendanceSession, listAttendanceHistory, listAttendanceMarks, listAttendanceSessions, COURSE_COLORS, CourseColor, setCourseColor, createCourse, createGradeItem, createGroup, createStudent, deleteCourse, deleteGrade, applyCourseSync, deleteGradeItem, deleteGroup, exportBackup, loadSyncCourses, SyncResult, Grade, GradeHistoryEntry, GradeItem, Group as StudentGroup, GroupMembership, initDatabase, listCourses, listGradeHistory, listGradeItems, listGrades, listGroupMemberships, listGroups, listPeriods, listStudents, Period, renameGradeItem, renameGroup, saveGrade, saveGroupGrade, setPeriodClosed, stageRestore, Student, undoLastGrade, updatePeriod } from "./lib/db";
 import { CampusReport, CheckGroup, openCampusWindow, readCampusCourses, runCampusCheck, runCampusUpload } from "./lib/campus";
 import { currentSemester, planCourseSync, SyncAction } from "./lib/campusSync";
 import { hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
 import { campusStateFor, COURSE_COLOR_SWATCHES, courseColorStyle, countByFilter, hasPendingGrade, heatTint, isAtRisk, matchesFilter, STUDENT_FILTER, StudentFilter, StudentStatus } from "./lib/studentList";
 import { buildWeek, dayLabel, formatTime, nextClass, nextClassLabel, weekdayName } from "./lib/schedule";
+import { absenceLabel, applyCorrection, AttendanceCorrection, AttendanceState, courseTotalLabel, defaultSessionTiming, describeHistoryEntry, formatSessionDate, isValidSessionHours, MAX_SESSION_HOURS, MIN_SESSION_HOURS, resizeStates, rollCallDefaults, rollCallSummary, sessionLabel, stateCounts, toggleHour, toggleStudent } from "./lib/attendance";
 
 const studentFilterOptions: { key: StudentFilter; label: string; description: string }[] = [
   { key: STUDENT_FILTER.ALL, label: "Todos", description: "Todos los estudiantes del corte" },
@@ -57,6 +59,9 @@ const ICON_PATHS = {
   moon: "M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z",
   dots: "M4 12a1 1 0 1 0 2 0 1 1 0 1 0-2 0M11 12a1 1 0 1 0 2 0 1 1 0 1 0-2 0M18 12a1 1 0 1 0 2 0 1 1 0 1 0-2 0",
   chevronRight: "m9 18 6-6-6-6",
+  rollCall: "M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M10 3h4a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1M9 14l2 2 4-4",
+  calendar: "M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2M16 2v4M8 2v4M3 10h18",
+  history: "M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l4 2",
 } as const;
 
 function Icon({ name, size = 16 }: { name: keyof typeof ICON_PATHS; size?: number }) {
@@ -159,7 +164,11 @@ function App() {
   const [backupMessage, setBackupMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [restoreMessage, setRestoreMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [fatalStartupError, setFatalStartupError] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"list" | "groups">("list");
+  const [viewMode, setViewMode] = useState<"list" | "groups" | "attendance">("list");
+  const [rollCallModal, setRollCallModal] = useState(false);
+  // Bumped after a roll call is saved so the Asistencia view reloads and shows that session.
+  const [attendanceReload, setAttendanceReload] = useState(0);
+  const [attendanceFocus, setAttendanceFocus] = useState<string | null>(null);
   const [groups, setGroups] = useState<StudentGroup[]>([]);
   const [memberships, setMemberships] = useState<GroupMembership[]>([]);
   const [groupManageModal, setGroupManageModal] = useState(false);
@@ -1241,17 +1250,20 @@ function App() {
                 <div className="course-header">
                   <div><Title order={1} className="course-title" style={courseColorStyle(selectedCourse.color) as CSSProperties}><span className="course-title-dot" aria-hidden="true" />{selectedCourse.name}</Title><Text c="dimmed" size="sm" mt={4}>{courseSubtitle}</Text></div>
                   <Group gap="xs">
+                    <Button leftSection={<Icon name="rollCall" />} disabled={!students.length} onClick={() => setRollCallModal(true)}>Tomar asistencia</Button>
                     <Button color="green" variant="light" disabled={!students.length} onClick={openCampusUpload}>Subir al Campus</Button>
                     <Menu shadow="md" width={240}><Menu.Target><Button color="pink" variant="filled" disabled={activeState !== "active"}>Calificar ▾</Button></Menu.Target><Menu.Dropdown>{gradeItems.map((item) => <Menu.Item key={item.id} onClick={() => openGradeWalkthrough(item)}>Calificar {item.name}</Menu.Item>)}<Menu.Divider /><Menu.Item onClick={() => openGroupGradeModal()}>Calificar grupo</Menu.Item></Menu.Dropdown></Menu>
                     <Menu shadow="md" width={220} position="bottom-end"><Menu.Target><Button variant="default" aria-label="Más acciones del curso">⋯</Button></Menu.Target><Menu.Dropdown><Menu.Item color="red" onClick={() => { setDeleteCourseError(""); setDeleteCourseModal(true); }}>Eliminar curso</Menu.Item></Menu.Dropdown></Menu>
                   </Group>
                 </div>
                 <Group justify="space-between" wrap="wrap">
-                  <SegmentedControl aria-label="Cortes" value={activePeriod?.id ?? ""} data={periods.map((period) => ({ value: period.id, label: <span className={periodState(period) === "locked" ? "corte-locked" : undefined}>{`Corte ${period.number} · ${periodState(period) === "locked" ? "Cerrado" : "Abierto"}`}</span> }))} onChange={(value) => { const index = periods.findIndex((period) => period.id === value); if (index >= 0) void selectPeriod(index); }} />
-                  <SegmentedControl aria-label="Vista" value={viewMode} data={[{ value: "list", label: "Notas" }, { value: "groups", label: "Grupos" }]} onChange={(value) => setViewMode(value === "groups" ? "groups" : "list")} />
+                  {viewMode === "attendance" ? <div /> : <SegmentedControl aria-label="Cortes" value={activePeriod?.id ?? ""} data={periods.map((period) => ({ value: period.id, label: <span className={periodState(period) === "locked" ? "corte-locked" : undefined}>{`Corte ${period.number} · ${periodState(period) === "locked" ? "Cerrado" : "Abierto"}`}</span> }))} onChange={(value) => { const index = periods.findIndex((period) => period.id === value); if (index >= 0) void selectPeriod(index); }} />}
+                  <SegmentedControl aria-label="Vista" value={viewMode} data={[{ value: "list", label: "Notas" }, { value: "groups", label: "Grupos" }, { value: "attendance", label: "Asistencia" }]} onChange={(value) => setViewMode(value === "groups" || value === "attendance" ? value : "list")} />
                 </Group>
-                <Group justify="space-between" align="flex-end" wrap="wrap"><Group align="flex-end" wrap="wrap" gap="xs"><TextInput aria-label="Buscar estudiante" placeholder="Nombre, código o correo" value={studentSearch} onChange={(event) => setStudentSearch(event.currentTarget.value)} w={240} /><Button color="blue" variant="light" onClick={openSplitEditor} disabled={activeState === "locked"}>Actividades {activePeriod?.activityPercent ?? 40}% · {examLabel} {activePeriod?.examPercent ?? 60}%</Button><Button variant="default" disabled={activeState !== "active"} onClick={() => setActivityModal(true)}>Agregar actividad</Button><Button variant="default" onClick={() => setStudentModal(true)}>Agregar estudiante</Button></Group><Group align="flex-end" wrap="wrap" gap="xs"><Button onClick={openRoulette} disabled={!students.length} style={{ background: "linear-gradient(90deg, #ff3b3b, #ff9500, #ffe135, #2ecc71, #3b82f6, #8b5cf6, #ec4899)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, textShadow: "0 1px 2px rgba(0,0,0,0.35)" }}>Ruleta</Button><Menu shadow="md" width={220}><Menu.Target><Button color="violet" variant="light" disabled={!students.length}>Exportar</Button></Menu.Target><Menu.Dropdown><Menu.Item onClick={() => { setExportError(""); setExportModal(true); }}>Exportar imagen</Menu.Item><Menu.Item onClick={() => { setTemplateColumns(["code", "name", "email", ...gradeItems.map((item) => item.id)]); setTemplateModal(true); }}>Exportar planilla</Menu.Item></Menu.Dropdown></Menu><Button variant={activeState === "locked" ? "light" : "default"} color={activeState === "locked" ? "green" : "orange"} onClick={() => void togglePeriodClosed()}>{activeState === "locked" ? "Reabrir corte" : "Cerrar corte"}</Button></Group></Group>
-                {viewMode === "groups" ? (() => {
+                {viewMode === "attendance" ? null : <Group justify="space-between" align="flex-end" wrap="wrap"><Group align="flex-end" wrap="wrap" gap="xs"><TextInput aria-label="Buscar estudiante" placeholder="Nombre, código o correo" value={studentSearch} onChange={(event) => setStudentSearch(event.currentTarget.value)} w={240} /><Button color="blue" variant="light" onClick={openSplitEditor} disabled={activeState === "locked"}>Actividades {activePeriod?.activityPercent ?? 40}% · {examLabel} {activePeriod?.examPercent ?? 60}%</Button><Button variant="default" disabled={activeState !== "active"} onClick={() => setActivityModal(true)}>Agregar actividad</Button><Button variant="default" onClick={() => setStudentModal(true)}>Agregar estudiante</Button></Group><Group align="flex-end" wrap="wrap" gap="xs"><Button onClick={openRoulette} disabled={!students.length} style={{ background: "linear-gradient(90deg, #ff3b3b, #ff9500, #ffe135, #2ecc71, #3b82f6, #8b5cf6, #ec4899)", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, textShadow: "0 1px 2px rgba(0,0,0,0.35)" }}>Ruleta</Button><Menu shadow="md" width={220}><Menu.Target><Button color="violet" variant="light" disabled={!students.length}>Exportar</Button></Menu.Target><Menu.Dropdown><Menu.Item onClick={() => { setExportError(""); setExportModal(true); }}>Exportar imagen</Menu.Item><Menu.Item onClick={() => { setTemplateColumns(["code", "name", "email", ...gradeItems.map((item) => item.id)]); setTemplateModal(true); }}>Exportar planilla</Menu.Item></Menu.Dropdown></Menu><Button variant={activeState === "locked" ? "light" : "default"} color={activeState === "locked" ? "green" : "orange"} onClick={() => void togglePeriodClosed()}>{activeState === "locked" ? "Reabrir corte" : "Cerrar corte"}</Button></Group></Group>}
+                {viewMode === "attendance" ? (
+                  <AttendanceView key={selectedCourse.id} courseId={selectedCourse.id} students={students} reload={attendanceReload} focusSessionId={attendanceFocus} />
+                ) : viewMode === "groups" ? (() => {
                   const unassignedStudents = filteredStudents.filter((studentItem) => !groupForStudent(studentItem.id));
                   const renderUnassignedMember = (studentItem: Student) => (
                     <Group key={studentItem.id} gap="xs" wrap="nowrap">
@@ -1571,6 +1583,17 @@ function App() {
         </Stack>
       </Modal>
       <Modal opened={gradeModal} onClose={() => setGradeModal(false)} title={gradeItem ? `Calificar · ${gradeItem.name}` : "Calificar"} centered size="560px" onKeyDown={(event) => { const key = event.key.toLowerCase(); if (key === "enter") { event.preventDefault(); if (event.ctrlKey) { void clearGrade(event.shiftKey ? -1 : 1); } else { void commitGrade(event.shiftKey ? -1 : 1); } return; } if (key === "escape") { event.preventDefault(); setGradeModal(false); return; } if (key === "l") { event.preventDefault(); void commitGrade(1); return; } if (key === "h") { event.preventDefault(); void commitGrade(-1); return; } if (key === "z" && event.ctrlKey) { event.preventDefault(); void undoGrade(); return; } }}><Stack><Text c="dimmed">{(() => { const indexes = gradeItem ? gradeableStudentIndexes(gradeItem.id) : []; const position = indexes.indexOf(gradeIndex); return position >= 0 ? `Por calificar ${position + 1} de ${indexes.length}` : "Editando estudiante"; })()}</Text><Title order={3}>{students[gradeIndex]?.fullName}</Title><Text size="sm" c="dimmed">Código {students[gradeIndex]?.code}</Text><TextInput ref={gradeInputRef} label="Nota (0,0 a 5,0)" value={gradeValue} error={gradeError} autoFocus inputMode="decimal" onChange={(event) => { setGradeValue(event.currentTarget.value); setGradeError(""); }} /><Group justify="space-between" wrap="nowrap"><Button variant="default" onClick={() => void commitGrade(-1)} disabled={gradeIndex === 0}>Anterior <span className="shortcut">Shift+Enter · H</span></Button><Button variant="light" color="gray" onClick={() => void clearGrade(1)}>Quitar nota <span className="shortcut">Ctrl+Enter</span></Button><Button onClick={() => void commitGrade(1)}>Siguiente <span className="shortcut">Enter · L</span></Button></Group><Group justify="space-between"><Button variant="subtle" onClick={openGradeHistory} disabled={!gradeHistory.length}>Historial</Button><Button variant="subtle" color="orange" onClick={() => void undoGrade()} disabled={activeState === "locked" || !gradeHistory.some((entry) => !entry.undone)}>Deshacer <span className="shortcut">Ctrl+Z</span></Button></Group></Stack></Modal>
+      <Modal opened={rollCallModal} onClose={() => setRollCallModal(false)} title="Tomar asistencia" centered size="560px">
+        {selectedCourse ? (
+          <RollCallForm
+            courseId={selectedCourse.id}
+            schedules={(selectedCourse.campusGroups ?? []).map((group) => group.schedule)}
+            students={students}
+            onCancel={() => setRollCallModal(false)}
+            onSaved={(session) => { setRollCallModal(false); setAttendanceFocus(session.id); setAttendanceReload((value) => value + 1); setViewMode("attendance"); }}
+          />
+        ) : null}
+      </Modal>
       <Modal opened={gradeHistoryModal} onClose={() => setGradeHistoryModal(false)} title={gradeItem ? `Historial · ${students[gradeIndex]?.fullName} · ${gradeItem.name}` : "Historial"} centered>
         <Stack>
           {gradeHistory.length ? gradeHistory.map((entry) => (
@@ -1586,6 +1609,279 @@ function App() {
         </Stack>
       </Modal>
     </AppShell>
+  );
+}
+
+// Attendance (odd/tasks/attendance.md, design/asistencia/01-pestana-sesiones.html).
+const hourStateLabels: Record<AttendanceState, string> = { present: "presente", absent: "falta", justified: "justificada" };
+const hourStateMarks: Record<AttendanceState, string> = { present: "✓", absent: "F", justified: "J" };
+
+function errorDetail(cause: unknown) {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+function HourMarks({ states }: { states: AttendanceState[] }) {
+  return (
+    <span className="attendance-hours">
+      {states.map((state, index) => <span key={index} className="attendance-hour" data-state={state} title={`Hora ${index + 1}: ${hourStateLabels[state]}`}>{hourStateMarks[state]}</span>)}
+    </span>
+  );
+}
+
+// S1, S2: everyone starts present; the name toggles every hour, an hour button toggles that hour.
+function RollCallForm({ courseId, schedules, students, onCancel, onSaved }: { courseId: string; schedules: string[]; students: Student[]; onCancel: () => void; onSaved: (session: AttendanceSession) => void }) {
+  const [defaults] = useState(() => rollCallDefaults(schedules, new Date()));
+  const [date, setDate] = useState(defaults.date);
+  const [startTime, setStartTime] = useState(defaults.startTime);
+  const [hours, setHours] = useState(defaults.hours);
+  // Until the teacher edits the start or the hours, they follow the Campus schedule of the chosen date.
+  const [timingEdited, setTimingEdited] = useState(false);
+  const [states, setStates] = useState<Record<string, AttendanceState[]>>(() => Object.fromEntries(students.map((student) => [student.id, resizeStates([], defaults.hours)])));
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const rows = students.map((student) => states[student.id] ?? resizeStates([], hours));
+
+  function changeDate(value: string) {
+    setDate(value);
+    if (timingEdited) return;
+    const timing = defaultSessionTiming(schedules, value);
+    setStartTime(timing.startTime ?? defaults.startTime);
+    resize(timing.hours);
+  }
+
+  function changeHours(value: string | number) {
+    const next = typeof value === "number" ? value : Number(value);
+    if (!isValidSessionHours(next)) return;
+    setTimingEdited(true);
+    resize(next);
+  }
+
+  function resize(next: number) {
+    setHours(next);
+    setStates((current) => Object.fromEntries(Object.entries(current).map(([studentId, studentStates]) => [studentId, resizeStates(studentStates, next)])));
+  }
+
+  async function save() {
+    setSaving(true);
+    setSaveError("");
+    const absences = Object.fromEntries(students.flatMap((student) => {
+      const absentHours = (states[student.id] ?? []).flatMap((state, index) => state === "absent" ? [index + 1] : []);
+      return absentHours.length ? [[student.id, absentHours]] : [];
+    }));
+    try {
+      onSaved(await createAttendanceSession(courseId, { date, startTime, hours }, absences));
+    } catch (cause) {
+      setSaveError(`No se pudo guardar la asistencia. No se guardó nada. Detalle: ${errorDetail(cause)}`);
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Stack gap="sm">
+      <Text c="dimmed" size="sm">Todos empiezan presentes. Tocá el nombre de quien faltó; si llegó tarde, tocá las horas en que no estuvo.</Text>
+      <Group gap="sm" align="flex-end">
+        <TextInput label="Fecha" type="date" value={date} onChange={(event) => changeDate(event.currentTarget.value)} required />
+        <TextInput label="Hora inicio" type="time" value={startTime} onChange={(event) => { setTimingEdited(true); setStartTime(event.currentTarget.value); }} required />
+        <NumberInput label="Horas de clase" min={MIN_SESSION_HOURS} max={MAX_SESSION_HOURS} allowDecimal={false} clampBehavior="strict" value={hours} onChange={changeHours} w={110} />
+      </Group>
+      <div className="roll-list" role="list" aria-label="Estudiantes">
+        {students.map((student, index) => {
+          const studentStates = rows[index];
+          const absences = stateCounts(studentStates).absent;
+          return (
+            <div key={student.id} role="listitem" className="roll-row" data-absent={absences ? true : undefined}>
+              <button type="button" className="roll-name" aria-label={`${student.fullName}: ${absences ? "marcar presente" : "marcar falta en todas las horas"}`} onClick={() => setStates((current) => ({ ...current, [student.id]: toggleStudent(studentStates) }))}>
+                <b>{student.fullName}</b><small>{student.code}</small>
+              </button>
+              <span className="attendance-hours">
+                {studentStates.map((state, hourIndex) => (
+                  <button key={hourIndex} type="button" className="attendance-hour" data-state={state} aria-pressed={state === "absent"} aria-label={`${student.fullName}, hora ${hourIndex + 1}: ${hourStateLabels[state]}`} onClick={() => setStates((current) => ({ ...current, [student.id]: toggleHour(studentStates, hourIndex) }))}>{hourStateMarks[state]}</button>
+                ))}
+              </span>
+              <span className="attendance-pill" data-tone={absences ? "failing" : "passing"}>{absenceLabel(absences)}</span>
+            </div>
+          );
+        })}
+      </div>
+      {saveError ? <Text c="red" size="sm" role="alert">{saveError}</Text> : null}
+      <Group justify="space-between" wrap="wrap">
+        <Text size="sm" role="status">{rollCallSummary(rows)}</Text>
+        <Group gap="xs">
+          <Button variant="default" onClick={onCancel}>Cancelar</Button>
+          <Button leftSection={<Icon name="check" />} loading={saving} disabled={!students.length || !date || !startTime} onClick={() => void save()}>Guardar asistencia</Button>
+        </Group>
+      </Group>
+    </Stack>
+  );
+}
+
+// S6: sessions newest first on the left, the selected session's hours per student on the right.
+function AttendanceView({ courseId, students, reload, focusSessionId }: { courseId: string; students: Student[]; reload: number; focusSessionId: string | null }) {
+  const [sessions, setSessions] = useState<AttendanceSession[]>([]);
+  const [totals, setTotals] = useState<AttendanceTotal[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [marks, setMarks] = useState<AttendanceMark[]>([]);
+  const [loadError, setLoadError] = useState("");
+  const [correction, setCorrection] = useState<{ student: Student; states: AttendanceState[] } | null>(null);
+  const [refresh, setRefresh] = useState(0);
+
+  useEffect(() => {
+    let current = true;
+    Promise.all([listAttendanceSessions(courseId), courseAttendanceTotals(courseId)])
+      .then(([courseSessions, courseTotals]) => {
+        if (!current) return;
+        setSessions(courseSessions);
+        setTotals(courseTotals);
+        setLoadError("");
+        setSelectedId((selected) => [focusSessionId, selected].find((id) => id && courseSessions.some((session) => session.id === id)) ?? courseSessions[0]?.id ?? null);
+      })
+      .catch((cause) => { if (current) setLoadError(`No se pudo cargar la asistencia. Detalle: ${errorDetail(cause)}`); });
+    return () => { current = false; };
+  }, [courseId, reload, focusSessionId, refresh]);
+
+  useEffect(() => {
+    if (!selectedId) { setMarks([]); return; }
+    let current = true;
+    listAttendanceMarks(selectedId)
+      .then((sessionMarks) => { if (current) setMarks(sessionMarks); })
+      .catch((cause) => { if (current) setLoadError(`No se pudo cargar la asistencia. Detalle: ${errorDetail(cause)}`); });
+    return () => { current = false; };
+  }, [selectedId, refresh]);
+
+  const selected = sessions.find((session) => session.id === selectedId) ?? null;
+  const recordedHours = sessions.reduce((total, session) => total + session.hours, 0);
+  const statesFor = (studentId: string) => marks.filter((mark) => mark.studentId === studentId).map((mark) => mark.state);
+
+  if (loadError) return <Card withBorder><Text c="red" role="alert">{loadError}</Text></Card>;
+  if (!sessions.length) {
+    return <Card withBorder><Text c="dimmed">Todavía no tomaste asistencia en este curso. Usá <b>Tomar asistencia</b> para registrar la primera clase.</Text></Card>;
+  }
+  return (
+    <div>
+      <p className="attendance-count"><Icon name="calendar" />{sessions.length} {sessions.length === 1 ? "clase" : "clases"} · {recordedHours} {recordedHours === 1 ? "hora registrada" : "horas registradas"}</p>
+      <div className="attendance-split">
+        <nav className="attendance-sessions" aria-label="Fechas de asistencia">
+          {sessions.map((session) => (
+            <button key={session.id} type="button" aria-pressed={session.id === selectedId} onClick={() => setSelectedId(session.id)}>
+              <span><b>{formatSessionDate(session.date)}</b><small>{session.startTime} · {session.hours} {session.hours === 1 ? "hora" : "horas"}</small></span>
+              <span className="attendance-pill" data-tone={session.absentStudents ? "failing" : "passing"}>{sessionLabel(session.absentStudents)}</span>
+            </button>
+          ))}
+        </nav>
+        <Table.ScrollContainer minWidth={560}>
+          <Table className="grade-table attendance-table" withTableBorder aria-label={selected ? `Asistencia del ${formatSessionDate(selected.date)}` : undefined}>
+            <Table.Thead><Table.Tr><Table.Th>Estudiante</Table.Th><Table.Th>Horas de esta clase</Table.Th><Table.Th>Faltas de esta clase</Table.Th><Table.Th>Total del curso</Table.Th><Table.Th /></Table.Tr></Table.Thead>
+            <Table.Tbody>
+              {students.map((student) => {
+                const states = statesFor(student.id);
+                const counts = stateCounts(states);
+                const total = totals.find((item) => item.studentId === student.id);
+                return (
+                  <Table.Tr key={student.id}>
+                    <Table.Td className="attendance-student"><b>{student.fullName}</b><small>{student.code}</small></Table.Td>
+                    <Table.Td>{states.length ? <HourMarks states={states} /> : <Text c="dimmed" span title="No estaba en el curso cuando se tomó esta lista">—</Text>}</Table.Td>
+                    <Table.Td>{counts.absent ? <span className="attendance-pill" data-tone="failing">{counts.absent}</span> : counts.justified ? <span className="attendance-pill" data-tone="locked">Justificada</span> : <Text c="dimmed" span>—</Text>}</Table.Td>
+                    <Table.Td className="attendance-total" title={total ? `Faltas en el curso: ${courseTotalLabel(total.absentHours, total.recordedHours)}` : "Sin horas registradas"}>{total ? <>{total.absentHours} <Text c="dimmed" size="xs" span>/ {total.recordedHours} h</Text></> : <Text c="dimmed" span>—</Text>}</Table.Td>
+                    <Table.Td><Button variant="subtle" size="compact-sm" disabled={!states.length} aria-label={`Corregir asistencia de ${student.fullName}`} onClick={() => setCorrection({ student, states })}>Corregir</Button></Table.Td>
+                  </Table.Tr>
+                );
+              })}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
+      </div>
+      <p className="attendance-legend">
+        <span className="attendance-hour" data-state="present">✓</span>Presente
+        <span className="attendance-hour" data-state="absent">F</span>Falta (cuenta por hora)
+        <span className="attendance-hour" data-state="justified">J</span>Justificada (no cuenta, queda registrada)
+      </p>
+      <Modal opened={!!correction} onClose={() => setCorrection(null)} title="Corregir falta" centered size="560px">
+        {correction && selected ? <CorrectionForm session={selected} student={correction.student} states={correction.states} onCancel={() => setCorrection(null)} onSaved={() => { setCorrection(null); setRefresh((value) => value + 1); }} /> : null}
+      </Modal>
+    </div>
+  );
+}
+
+const correctionOptions = [
+  { action: "late", label: "Llegó tarde", description: "Elegí la hora en que llegó; las anteriores quedan como falta." },
+  { action: "excuse", label: "Justificar (excusa)", description: "La falta deja de contar, pero queda registrada como justificada." },
+  { action: "present", label: "Sí vino", description: "Error al tomar la lista: queda presente en todas las horas." },
+] as const;
+
+// S3, S4, S5: one of three corrections, a preview of the new hours and the full history.
+function CorrectionForm({ session, student, states, onCancel, onSaved }: { session: AttendanceSession; student: Student; states: AttendanceState[]; onCancel: () => void; onSaved: () => void }) {
+  const [action, setAction] = useState<AttendanceCorrection["action"] | null>(null);
+  const [arrivalHour, setArrivalHour] = useState<number | null>(null);
+  const [motive, setMotive] = useState("");
+  const [history, setHistory] = useState<AttendanceHistoryEntry[] | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+
+  useEffect(() => {
+    let current = true;
+    listAttendanceHistory(session.id, student.id).then((entries) => { if (current) setHistory(entries); }).catch(() => { if (current) setHistory([]); });
+    return () => { current = false; };
+  }, [session.id, student.id]);
+
+  const correction: AttendanceCorrection | null = action === "late" ? (arrivalHour ? { action, arrivalHour } : null) : action === "excuse" ? { action, motive } : action === "present" ? { action } : null;
+  let preview: AttendanceState[] | null = null;
+  let hint = "";
+  if (action === "late" && !arrivalHour) hint = "Elegí la hora en que llegó.";
+  else if (action === "excuse" && !motive.trim()) hint = "Escribí el motivo de la excusa.";
+  else if (correction) {
+    try { preview = applyCorrection(states, correction); } catch { hint = "Esta corrección no cambia ninguna hora."; }
+  }
+
+  async function save() {
+    if (!correction || !preview) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      await correctAttendance(session.id, student.id, correction);
+      onSaved();
+    } catch (cause) {
+      setSaveError(`No se pudo guardar la corrección. No se cambió nada. Detalle: ${errorDetail(cause)}`);
+      setSaving(false);
+    }
+  }
+
+  const absences = stateCounts(states).absent;
+  return (
+    <Stack gap="sm">
+      <Text c="dimmed" size="sm">{student.fullName} · {formatSessionDate(session.date)} · {absences} {absences === 1 ? "falta" : "faltas"} de {session.hours} {session.hours === 1 ? "hora" : "horas"}</Text>
+      <HourMarks states={states} />
+      <div className="attendance-options" role="radiogroup" aria-label="Tipo de corrección">
+        {correctionOptions.map((option) => (
+          <label key={option.action} className="attendance-option" data-selected={action === option.action || undefined}>
+            <input type="radio" name="attendance-correction" value={option.action} checked={action === option.action} onChange={() => setAction(option.action)} />
+            <span>
+              <b>{option.label}</b>
+              <Text c="dimmed" size="sm" span>{option.description}</Text>
+              {option.action === "late" && action === "late" ? (
+                <Group gap={6} mt={6} role="group" aria-label="Hora de llegada">
+                  {states.map((_, index) => <Button key={index} size="compact-sm" variant={arrivalHour === index + 1 ? "filled" : "default"} aria-pressed={arrivalHour === index + 1} onClick={() => setArrivalHour(index + 1)}>Hora {index + 1}</Button>)}
+                </Group>
+              ) : null}
+              {option.action === "excuse" && action === "excuse" ? (
+                <Textarea mt={6} autosize minRows={2} aria-label="Motivo de la excusa" placeholder="Motivo: incapacidad médica, permiso…" value={motive} onChange={(event) => setMotive(event.currentTarget.value)} required />
+              ) : null}
+            </span>
+          </label>
+        ))}
+      </div>
+      {preview ? <Group gap="xs"><Text size="sm">Quedará así:</Text><HourMarks states={preview} /></Group> : hint ? <Text c="dimmed" size="sm">{hint}</Text> : null}
+      <p className="sidebar-label attendance-history-label"><Icon name="history" />Historial</p>
+      <ul className="attendance-history">
+        {history === null ? <li>Cargando…</li> : history.length ? history.map((entry) => (
+          <li key={entry.id}>{new Date(entry.changedAt).toLocaleString("es-CO", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} · {describeHistoryEntry(entry)}</li>
+        )) : <li>Sin cambios desde que se tomó la lista.</li>}
+      </ul>
+      {saveError ? <Text c="red" size="sm" role="alert">{saveError}</Text> : null}
+      <Group justify="flex-end" gap="xs">
+        <Button variant="default" onClick={onCancel}>Cancelar</Button>
+        <Button loading={saving} disabled={!preview} onClick={() => void save()}>Guardar corrección</Button>
+      </Group>
+    </Stack>
   );
 }
 
