@@ -12,11 +12,13 @@ Branch `feature/home-agenda` (on top of `feature/campus-split-window`). Built an
 - S7: Colors only from tokens (course colors via the existing course palette); dark and light themes.
 
 ## Tasks
-- T1 (S2, S3, S4) Pure schedule helpers with tests: parse schedule strings, build the week (dedupe, sort, Saturday rule), find the next class from a given date/time, weekday names. Route: worker. Commit: pending
-- T2 (S1, S3-S7) Home screen layout in App.tsx/App.css with Mantine and tokens. Route: worker. Commit: pending
+- T1 (S2, S3, S4) Pure schedule helpers with tests: parse schedule strings, build the week (dedupe, sort, Saturday rule), find the next class from a given date/time, weekday names. Route: worker. Commit: b4bd48c
+- T2 (S1, S3-S7) Home screen layout in App.tsx/App.css with Mantine and tokens. Route: worker. Commit: b4bd48c
 - T3 Build/install NOTAZOD Test, report handoff. Route: inline. Commit: n/a
 
 ## Log
 - L1: "mejor si me gusta ahora dame un diseno de esto" (home screen screenshot).
 - L2: Design `design/inicio-cursos/` with 01-lista-compacta, 02-tarjetas, 03-agenda-semana; user handed off 03 ("Implement the design artboard design/inicio-cursos/03-agenda-semana.html"). 01 and 02 are alternatives.
 - L3: Evidence: campus_course_groups.schedule values in notazod-test.db: "LUN 16:00-18:00", "MAR 13:00-17:30", "LUN 13:00-15:00; MIE 15:30-18:00", "JUE 15:00-18:00; VIE 14:00-17:00".
+- L4: Evidence: worker RED (stub module: 1 pass / 9 fail) then GREEN 10/10; suite 110/110; tsc clean; build:staging ok; parent re-ran tsc and tests (110/110). Judgment calls: Dom column added when a class falls on Sunday; a class in progress is not "next"; merged duplicate groups show the first group name; other semesters only in "Otros semestres"; new explicit empty state. Committed b4bd48c. Slice boundary: 6bcf61d (design+spec) + b4bd48c (~740 lines incl. three artboards).
+
