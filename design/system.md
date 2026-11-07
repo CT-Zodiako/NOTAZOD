@@ -27,6 +27,15 @@ Source: `app/src/tokens.css`. Values below are existing project tokens, not prop
 - `--color-grade-locked: #475F7A`
 - `--color-grade-empty: #6B6B73`
 
+Course palette tokens (only for the per-course color dot, row tint and title dot; the palette also reuses primary, feedback-warning, border-focus, grade-passing, grade-pending and grade-locked):
+
+- `--course-blue: #2563EB`
+- `--course-teal: #0F766E`
+- `--course-pink: #BE185D`
+- `--course-indigo: #4338CA`
+- `--course-olive: #4D7C0F`
+- `--course-brown: #92400E`
+
 ## Typography
 
 - `--font-family-base: "Nunito", sans-serif`
@@ -124,6 +133,12 @@ Source: `app/src/tokens.css`. Values below are existing project tokens, not prop
 - `--color-feedback-error: #FF7A7A`
 - `--color-feedback-success: #5FCB7A`
 - `--color-feedback-warning: #F59E0B`
+- `--course-blue: #60A5FA` (course palette)
+- `--course-teal: #2DD4BF` (course palette)
+- `--course-pink: #F472B6` (course palette)
+- `--course-indigo: #818CF8` (course palette)
+- `--course-olive: #A3E635` (course palette)
+- `--course-brown: #D6A26B` (course palette)
 
 ## Component rules
 

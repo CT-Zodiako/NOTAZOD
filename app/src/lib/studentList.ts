@@ -73,14 +73,20 @@ export function countByFilter(statuses: StudentStatus[]): Record<StudentFilter, 
   return { all: count("all"), risk: count("risk"), pending: count("pending"), campus: count("campus") };
 }
 
-// Course color palette (S10): each stored key maps to a design token, so it follows the light/dark theme.
+// Course color palette (S10, S13): each stored key maps to a design token, so it follows the light/dark theme.
 export const COURSE_COLOR_SWATCHES = {
   primary: { token: "--color-action-primary", label: "Vino" },
-  locked: { token: "--color-grade-locked", label: "Azul acero" },
-  focus: { token: "--color-border-focus", label: "Dorado" },
-  pending: { token: "--color-grade-pending", label: "Violeta" },
-  passing: { token: "--color-grade-passing", label: "Verde" },
+  pink: { token: "--course-pink", label: "Rosa" },
   warning: { token: "--color-feedback-warning", label: "Naranja" },
+  focus: { token: "--color-border-focus", label: "Dorado" },
+  brown: { token: "--course-brown", label: "Café" },
+  olive: { token: "--course-olive", label: "Oliva" },
+  passing: { token: "--color-grade-passing", label: "Verde" },
+  teal: { token: "--course-teal", label: "Turquesa" },
+  blue: { token: "--course-blue", label: "Azul" },
+  indigo: { token: "--course-indigo", label: "Índigo" },
+  pending: { token: "--color-grade-pending", label: "Violeta" },
+  locked: { token: "--color-grade-locked", label: "Azul acero" },
 } as const satisfies Record<CourseColor, { token: string; label: string }>;
 
 export function courseColorStyle(color: CourseColor) {

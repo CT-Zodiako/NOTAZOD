@@ -1035,7 +1035,7 @@ function App() {
     <AppShell header={selectedCourse ? undefined : { height: 48 }} navbar={selectedCourse ? { width: 260, breakpoint: "xs" } : undefined} padding="md">
       {selectedCourse ? (
         <AppShell.Navbar className="course-sidebar" aria-label="Panel del curso">
-          <img className="brand-logo" src="/branding/notazod-logo.png" alt="NOTAZOD" />
+          <div className="theme-row">{themeSwitch}</div>
           <button type="button" className="sidebar-back" onClick={() => { setSelectedCourse(null); setGroups([]); setMemberships([]); setViewMode("list"); }}>← Volver a cursos</button>
           <div>
             <p className="sidebar-label">Cursos {sidebarSemester}</p>
@@ -1054,9 +1054,11 @@ function App() {
                       </div>
                     </Popover.Dropdown>
                   </Popover>
-                  <button type="button" className="sidebar-course" aria-current={course.id === selectedCourse.id ? "page" : undefined} onClick={() => void openCourse(course)}>
-                    <span>{course.name}</span><small>{course.students}</small>
-                  </button>
+                  <Tooltip label={course.name} openDelay={300} position="right" withinPortal>
+                    <button type="button" className="sidebar-course" aria-current={course.id === selectedCourse.id ? "page" : undefined} onClick={() => void openCourse(course)}>
+                      <span>{course.name}</span><small>{course.students}</small>
+                    </button>
+                  </Tooltip>
                 </div>
               ))}
             </nav>
@@ -1088,7 +1090,6 @@ function App() {
             <button type="button" onClick={() => void handleRestoreBackup()} aria-label="Restaurar copia de seguridad de NOTAZOD"><Icon name="upload" />Restaurar copia de seguridad</button>
             <button type="button" onClick={() => void checkForUpdates()} aria-label="Buscar actualizaciones de NOTAZOD"><Icon name="clock" />Buscar actualizaciones</button>
             <button type="button" onClick={() => void openUrl("https://github.com/CT-Zodiako/NOTAZOD")} aria-label="Abrir repositorio de NOTAZOD en GitHub"><Icon name="code" />GitHub</button>
-            <div className="theme-row">{themeSwitch}</div>
           </div>
         </AppShell.Navbar>
       ) : (

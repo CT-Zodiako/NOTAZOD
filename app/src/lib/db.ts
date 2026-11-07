@@ -2,8 +2,8 @@ import Database from "@tauri-apps/plugin-sql";
 import { invoke } from "@tauri-apps/api/core";
 import type { CampusGroupMetadata, ExistingCourse, SyncAction } from "./campusSync";
 
-// Palette keys a course color may take (S11); App maps each one to a design token.
-export const COURSE_COLORS = ["primary", "locked", "focus", "pending", "passing", "warning"] as const;
+// Palette keys a course color may take (S11, S13), in palette order; App maps each one to a design token.
+export const COURSE_COLORS = ["primary", "pink", "warning", "focus", "brown", "olive", "passing", "teal", "blue", "indigo", "pending", "locked"] as const;
 export type CourseColor = (typeof COURSE_COLORS)[number];
 export const DEFAULT_COURSE_COLOR: CourseColor = "primary";
 

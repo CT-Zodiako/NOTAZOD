@@ -96,18 +96,25 @@ test("filters: counts per filter", () => {
   assert.deepEqual(countByFilter([]), { all: 0, risk: 0, pending: 0, campus: 0 });
 });
 
-test("course colors: the six palette keys map to their design tokens and names in palette order", () => {
+test("course colors: the twelve palette keys map to their design tokens and names in palette order (S13)", () => {
   assert.deepEqual(Object.entries(COURSE_COLOR_SWATCHES).map(([key, swatch]) => [key, swatch.token, swatch.label]), [
     ["primary", "--color-action-primary", "Vino"],
-    ["locked", "--color-grade-locked", "Azul acero"],
-    ["focus", "--color-border-focus", "Dorado"],
-    ["pending", "--color-grade-pending", "Violeta"],
-    ["passing", "--color-grade-passing", "Verde"],
+    ["pink", "--course-pink", "Rosa"],
     ["warning", "--color-feedback-warning", "Naranja"],
+    ["focus", "--color-border-focus", "Dorado"],
+    ["brown", "--course-brown", "Café"],
+    ["olive", "--course-olive", "Oliva"],
+    ["passing", "--color-grade-passing", "Verde"],
+    ["teal", "--course-teal", "Turquesa"],
+    ["blue", "--course-blue", "Azul"],
+    ["indigo", "--course-indigo", "Índigo"],
+    ["pending", "--color-grade-pending", "Violeta"],
+    ["locked", "--color-grade-locked", "Azul acero"],
   ]);
 });
 
 test("course colors: the style exposes the course color as a CSS variable", () => {
   assert.deepEqual(courseColorStyle("passing"), { "--course-color": "var(--color-grade-passing)" });
   assert.deepEqual(courseColorStyle("primary"), { "--course-color": "var(--color-action-primary)" });
+  assert.deepEqual(courseColorStyle("indigo"), { "--course-color": "var(--course-indigo)" });
 });

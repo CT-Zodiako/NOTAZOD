@@ -332,6 +332,33 @@
           "$value": "{primitive.color.neutral.500}",
           "$description": "Untouched cell, shown as a dash"
         }
+      },
+      "course": {
+        "$description": "Course identity palette (S13). Emitted as --course-<name>; the other six course colors reuse primary, warning, border-focus, grade-passing, grade-pending and grade-locked.",
+        "blue": {
+          "$type": "color",
+          "$value": "#2563EB"
+        },
+        "teal": {
+          "$type": "color",
+          "$value": "#0F766E"
+        },
+        "pink": {
+          "$type": "color",
+          "$value": "#BE185D"
+        },
+        "indigo": {
+          "$type": "color",
+          "$value": "#4338CA"
+        },
+        "olive": {
+          "$type": "color",
+          "$value": "#4D7C0F"
+        },
+        "brown": {
+          "$type": "color",
+          "$value": "#92400E"
+        }
       }
     },
     "shadow": {
@@ -456,6 +483,32 @@
         "warning": {
           "$type": "color",
           "$value": "#F59E0B"
+        }
+      },
+      "course": {
+        "blue": {
+          "$type": "color",
+          "$value": "#60A5FA"
+        },
+        "teal": {
+          "$type": "color",
+          "$value": "#2DD4BF"
+        },
+        "pink": {
+          "$type": "color",
+          "$value": "#F472B6"
+        },
+        "indigo": {
+          "$type": "color",
+          "$value": "#818CF8"
+        },
+        "olive": {
+          "$type": "color",
+          "$value": "#A3E635"
+        },
+        "brown": {
+          "$type": "color",
+          "$value": "#D6A26B"
         }
       }
     }

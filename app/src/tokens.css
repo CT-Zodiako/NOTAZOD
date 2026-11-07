@@ -48,6 +48,12 @@
   --color-grade-computedSurface: #FDF6E3;
   --color-grade-locked: #475F7A;
   --color-grade-empty: #6B6B73;
+  --course-blue: #2563EB;
+  --course-teal: #0F766E;
+  --course-pink: #BE185D;
+  --course-indigo: #4338CA;
+  --course-olive: #4D7C0F;
+  --course-brown: #92400E;
   --shadow-overlay: 0px 8px 24px 0px #18181B33;
   --opacity-disabled: 0.55;
   --component-table-rowHeight: 24px;
@@ -101,6 +107,12 @@
   --color-feedback-error: #FF7A7A;
   --color-feedback-success: #5FCB7A;
   --color-feedback-warning: #F59E0B;
+  --course-blue: #60A5FA;
+  --course-teal: #2DD4BF;
+  --course-pink: #F472B6;
+  --course-indigo: #818CF8;
+  --course-olive: #A3E635;
+  --course-brown: #D6A26B;
 }
 @media (prefers-reduced-motion: reduce) {
   :root { --duration-fast: 0ms; --duration-base: 0ms; }

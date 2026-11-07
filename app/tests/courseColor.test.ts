@@ -120,9 +120,28 @@ test.after(() => {
   rmSync(tempDir, { recursive: true, force: true });
 });
 
-test("COURSE_COLORS lists the six palette keys", async () => {
+test("COURSE_COLORS lists the twelve palette keys in palette order (S13)", async () => {
   const db = await openDb("palette.db");
-  assert.deepEqual([...db.COURSE_COLORS], ["primary", "locked", "focus", "pending", "passing", "warning"]);
+  assert.deepEqual([...db.COURSE_COLORS], ["primary", "pink", "warning", "focus", "brown", "olive", "passing", "teal", "blue", "indigo", "pending", "locked"]);
+});
+
+test("setCourseColor stores each of the six new palette keys and listCourses returns it after reopening", async () => {
+  const dbName = "new-colors.db";
+  createLegacyDatabase(dbName);
+  let db = await openDb(dbName);
+  const before = snapshot(dbName);
+
+  for (const color of ["pink", "brown", "olive", "teal", "blue", "indigo"]) {
+    await db.setCourseColor("c1", color);
+
+    assert.deepEqual(storedColors(dbName), [{ id: "c1", color }, { id: "c2", color: null }]);
+    assert.deepEqual(snapshot(dbName), before);
+    db = await openDb(dbName);
+    assert.deepEqual((await db.listCourses()).map(({ id, color: stored }) => ({ id, color: stored })), [
+      { id: "c1", color },
+      { id: "c2", color: "primary" },
+    ]);
+  }
 });
 
 test("initDatabase migrates a database without course colors, keeps every row and reports the default color", async () => {
@@ -158,7 +177,7 @@ test("setCourseColor stores a palette key that listCourses returns after reopeni
   ]);
 });
 
-for (const invalid of ["red", "#fff", "", "PRIMARY", " primary"]) {
+for (const invalid of ["red", "#fff", "", "PRIMARY", " primary", "Blue", "course-blue", "--course-teal", "rosa", "brown "]) {
   test(`setCourseColor rejects ${JSON.stringify(invalid)} and leaves the stored data unchanged`, async () => {
     const dbName = `invalid-${loads}.db`;
     createLegacyDatabase(dbName);
