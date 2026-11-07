@@ -1,0 +1,27 @@
+{
+  "title": "Inicio: tus cursos",
+  "brief": "Home screen (course list) for NOTAZOD at half-screen width (~820px), now that the Campus opens side by side. Fix overlapping header actions, truncated semester badge and names broken letter by letter; reuse the course view style (theme switch, course colors, outline icons).",
+  "artboards": [
+    {
+      "file": "01-lista-compacta.html",
+      "title": "Lista compacta",
+      "tradeoff": "One row per course with color, groups as chips and student count; secondary actions in a ⋯ menu. Densest and closest to the course sidebar; schedule and room only on hover.",
+      "width": 820,
+      "height": 900
+    },
+    {
+      "file": "02-tarjetas.html",
+      "title": "Tarjetas por curso",
+      "tradeoff": "Responsive cards with color bar, each group's schedule and room visible, and a dashed 'Crear curso' card. Most readable details; fewer courses per screen.",
+      "width": 820,
+      "height": 900
+    },
+    {
+      "file": "03-agenda-semana.html",
+      "title": "Agenda de la semana",
+      "tradeoff": "Starts from today: next class highlighted, a Mon–Fri timetable built from the Campus schedules, and a compact course list below. Most useful day to day; depends on schedules being synced and is the largest change.",
+      "width": 820,
+      "height": 900
+    }
+  ]
+}

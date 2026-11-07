@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "chosen": "03-agenda-semana.html",
+  "handoffs": {
+    "03-agenda-semana.html": {
+      "status": "in_progress",
+      "queued": false,
+      "sentAt": "2026-11-07T01:04:48.998Z",
+      "startedAt": "2026-11-07T01:04:56.005Z",
+      "implementedAt": null,
+      "note": "Starting on branch feature/home-agenda in NOTAZOD Test."
+    }
+  }
+}
