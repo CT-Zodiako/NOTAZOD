@@ -230,19 +230,9 @@ async function createAttendanceSchema(db: Database) {
     );
   `);
   await db.execute("CREATE INDEX IF NOT EXISTS idx_attendance_marks_student ON attendance_marks (student_id)");
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS attendance_history (
-      id TEXT PRIMARY KEY NOT NULL,
-      session_id TEXT NOT NULL REFERENCES attendance_sessions(id) ON DELETE CASCADE,
-      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-      changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-      action TEXT NOT NULL CHECK (action IN ('late', 'excuse', 'present')),
-      motive TEXT,
-      before_states TEXT NOT NULL,
-      after_states TEXT NOT NULL
-    );
-  `);
-  await db.execute("CREATE INDEX IF NOT EXISTS idx_attendance_history_pair ON attendance_history (session_id, student_id)");
+  await db.execute(ATTENDANCE_HISTORY_TABLE);
+  await migrateAttendanceHistory(db);
+  await db.execute(ATTENDANCE_HISTORY_INDEX);
   // The plugin cannot hold a transaction across execute() calls, so a roll call is one INSERT into this
   // view: its trigger writes the session and every mark ({ studentId: [state per hour] }) in that statement.
   await db.execute("CREATE VIEW IF NOT EXISTS attendance_roll_calls AS SELECT id AS session_id, course_id, date, start_time, hours, NULL AS marks FROM attendance_sessions WHERE 0");
@@ -259,9 +249,25 @@ async function createAttendanceSchema(db: Database) {
         SELECT NEW.session_id, s.key, h.key + 1, h.value FROM json_each(NEW.marks) s, json_each(s.value) h;
     END
   `);
-  // Likewise a correction is one INSERT into the history: its trigger applies after_states to the marks,
-  // and aborts when the marks no longer match before_states (changed since they were read).
-  await db.execute(`
+  await db.execute(ATTENDANCE_HISTORY_APPLY);
+  await db.execute(ATTENDANCE_HISTORY_IMMUTABLE);
+}
+
+const ATTENDANCE_HISTORY_TABLE = `
+    CREATE TABLE IF NOT EXISTS attendance_history (
+      id TEXT PRIMARY KEY NOT NULL,
+      session_id TEXT NOT NULL REFERENCES attendance_sessions(id) ON DELETE CASCADE,
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      action TEXT NOT NULL CHECK (action IN ('late', 'excuse', 'present', 'edit')),
+      motive TEXT,
+      before_states TEXT NOT NULL,
+      after_states TEXT NOT NULL
+    )`;
+const ATTENDANCE_HISTORY_INDEX = "CREATE INDEX IF NOT EXISTS idx_attendance_history_pair ON attendance_history (session_id, student_id)";
+// Likewise a correction is one INSERT into the history: its trigger applies after_states to the marks,
+// and aborts when the marks no longer match before_states (changed since they were read).
+const ATTENDANCE_HISTORY_APPLY = `
     CREATE TRIGGER IF NOT EXISTS attendance_history_apply AFTER INSERT ON attendance_history
     BEGIN
       SELECT RAISE(ABORT, 'Attendance changed since it was read') WHERE NEW.before_states IS NOT (
@@ -269,14 +275,37 @@ async function createAttendanceSchema(db: Database) {
       );
       UPDATE attendance_marks SET state = json_extract(NEW.after_states, '$[' || (hour - 1) || ']')
         WHERE session_id = NEW.session_id AND student_id = NEW.student_id;
-    END
-  `);
-  await db.execute(`
+    END`;
+const ATTENDANCE_HISTORY_IMMUTABLE = `
     CREATE TRIGGER IF NOT EXISTS attendance_history_immutable BEFORE UPDATE ON attendance_history
     BEGIN
       SELECT RAISE(ABORT, 'Attendance history cannot be changed');
-    END
-  `);
+    END`;
+
+// S8: a history table created before the "edit" action only accepts late/excuse/present. SQLite cannot
+// alter a CHECK, so the table is rebuilt with the new one, keeping every row (and its rowid, which orders
+// the history), its index and its triggers. The plugin cannot hold a transaction across execute() calls,
+// so the whole rebuild is one multi-statement execute(): it commits completely or not at all. Renaming
+// the old table first moves its triggers with it, so copying the rows does not re-apply them.
+async function migrateAttendanceHistory(db: Database) {
+  const table = await db.select<{ sql: string }[]>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'attendance_history'");
+  if (!table[0] || table[0].sql.includes("'edit'")) return;
+  try {
+    await db.execute(`BEGIN IMMEDIATE;
+      ALTER TABLE attendance_history RENAME TO attendance_history_old;
+      ${ATTENDANCE_HISTORY_TABLE};
+      INSERT INTO attendance_history (rowid, id, session_id, student_id, changed_at, action, motive, before_states, after_states)
+        SELECT rowid, id, session_id, student_id, changed_at, action, motive, before_states, after_states FROM attendance_history_old ORDER BY rowid;
+      DROP TABLE attendance_history_old;
+      ${ATTENDANCE_HISTORY_INDEX};
+      ${ATTENDANCE_HISTORY_APPLY};
+      ${ATTENDANCE_HISTORY_IMMUTABLE};
+      COMMIT;`);
+  } catch (error) {
+    // A failed statement leaves the transaction open on that connection; roll it back (no-op elsewhere).
+    try { await db.execute("ROLLBACK"); } catch { /* no transaction open on this connection */ }
+    throw error;
+  }
 }
 
 export async function listCourses(): Promise<Course[]> {
@@ -807,7 +836,7 @@ export async function courseAttendanceTotals(courseId: string): Promise<Attendan
   `, [courseId]);
 }
 
-// S3, S4, S5, S7: validates, then appends one history entry whose trigger applies the new states in the same statement.
+// S3, S4, S5, S7, S8: validates, then appends one history entry whose trigger applies the new states in the same statement.
 export async function correctAttendance(sessionId: string, studentId: string, correction: AttendanceCorrection): Promise<AttendanceState[]> {
   const db = await getDatabase();
   if (!(await fetchAttendanceSession(db, sessionId))) throw new Error("Attendance session not found");

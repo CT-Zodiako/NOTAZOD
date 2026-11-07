@@ -122,31 +122,37 @@ test("history (S5): each correction is described with the absences it replaced",
   assert.equal(describeHistoryEntry({ action: "present", motive: null, beforeStates: ["absent", "present"], afterStates: ["present", "present"] }), "Sí vino: presente en todas las horas (antes 1 falta)");
 });
 
-// Design 04: the correction dialog edits the hours directly and asks why; planCorrection maps that to a stored correction.
-import { hourRangeLabel, planCorrection, toggleCorrectionHour } from "../src/lib/attendance.ts";
+// Design 04 / S8: the correction dialog edits the hours directly and saves them as one "edit" correction.
+import { hourRangeLabel, toggleCorrectionHour } from "../src/lib/attendance.ts";
 
-test("correction: late arrival from tapped hours (absent first, present from the arrival hour)", () => {
-  const plan = planCorrection(["absent", "absent", "absent"], ["absent", "present", "present"], "late", "");
-  assert.deepEqual(plan, { correction: { action: "late", arrivalHour: 2 }, after: ["absent", "present", "present"] });
+test("edit (S8): any present/absent combination of the session's hours is stored as given", () => {
+  assert.deepEqual(applyCorrection(["present", "present", "present"], { action: "edit", states: ["present", "present", "absent"] }), ["present", "present", "absent"]);
+  assert.deepEqual(applyCorrection(["present", "absent", "present"], { action: "edit", states: ["absent", "absent", "absent"] }), ["absent", "absent", "absent"]);
+  assert.deepEqual(applyCorrection(["absent", "absent", "absent"], { action: "edit", states: ["absent", "present", "present"] }), ["absent", "present", "present"]);
+  assert.deepEqual(applyCorrection(["justified", "absent"], { action: "edit", states: ["absent", "present"] }), ["absent", "present"]);
 });
 
-test("correction: 'Llegó tarde' with hours that are not a late arrival explains the rule", () => {
-  assert.deepEqual(planCorrection(["absent", "absent", "absent"], ["present", "absent", "present"], "late", ""), { hint: "Para «Llegó tarde» dejá en falta las horas antes de que llegara y en presente desde que llegó." });
+test("edit (S8): a justified hour left untouched stays justified while other hours change", () => {
+  assert.deepEqual(applyCorrection(["justified", "absent", "absent"], { action: "edit", states: ["justified", "present", "absent"] }), ["justified", "present", "absent"]);
 });
 
-test("correction: an excuse justifies every absent hour and needs a motive", () => {
-  assert.deepEqual(planCorrection(["absent", "present", "absent"], ["absent", "present", "absent"], "excuse", "  "), { hint: "Escribí el motivo de la excusa." });
-  assert.deepEqual(planCorrection(["absent", "present", "absent"], ["absent", "present", "absent"], "excuse", "Incapacidad"), { correction: { action: "excuse", motive: "Incapacidad" }, after: ["justified", "present", "justified"] });
-});
+for (const [label, before, states, message] of [
+  ["a no-op", ["absent", "present"], ["absent", "present"], "The correction does not change any hour"],
+  ["too few hours", ["absent", "present"], ["present"], "An edit needs one state per hour"],
+  ["too many hours", ["absent", "present"], ["present", "present", "present"], "An edit needs one state per hour"],
+  ["no states", ["absent", "present"], undefined, "An edit needs one state per hour"],
+  ["an unknown state", ["absent", "present"], ["present", "late"], "Invalid attendance state for hour 2: late"],
+  ["a new justified hour", ["absent", "present"], ["justified", "present"], "Invalid attendance state for hour 1: justified"],
+] as const) {
+  test(`edit (S8): ${label} is rejected`, () => {
+    assert.throws(() => applyCorrection([...before], { action: "edit", states: states as never }), { message });
+  });
+}
 
-test("correction: 'Error de lista' marks every hour present", () => {
-  assert.deepEqual(planCorrection(["absent", "absent"], ["absent", "present"], "error", ""), { correction: { action: "present" }, after: ["present", "present"] });
-});
-
-test("correction: no reason, or a reason that changes nothing, asks for something else", () => {
-  assert.deepEqual(planCorrection(["absent", "absent"], ["present", "present"], null, ""), { hint: "Elegí por qué cambia." });
-  assert.deepEqual(planCorrection(["present", "present"], ["present", "present"], "error", ""), { hint: "Esta corrección no cambia ninguna hora." });
-  assert.deepEqual(planCorrection(["present", "present"], ["present", "present"], "excuse", "Permiso"), { hint: "Esta corrección no cambia ninguna hora." });
+test("history (S8): an edit shows the new hours and the absences it replaced", () => {
+  assert.equal(describeHistoryEntry({ action: "edit", motive: null, beforeStates: ["absent", "absent", "absent"], afterStates: ["absent", "present", "present"] }), "Corregida: F ✓ ✓ (antes 3 faltas)");
+  assert.equal(describeHistoryEntry({ action: "edit", motive: null, beforeStates: ["present", "present", "present"], afterStates: ["present", "present", "absent"] }), "Corregida: ✓ ✓ F (antes 0 faltas)");
+  assert.equal(describeHistoryEntry({ action: "edit", motive: null, beforeStates: ["justified", "present"], afterStates: ["justified", "absent"] }), "Corregida: J F (antes 0 faltas)");
 });
 
 test("correction: tapping an hour toggles absent and present; a justified hour becomes present", () => {

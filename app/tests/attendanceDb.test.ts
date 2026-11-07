@@ -31,6 +31,11 @@ globalThis.__notazodSqlDatabase = {
     return {
       execute: async (sql, values = []) => {
         globalThis.__notazodBeforeExecute?.(sql);
+        // sqlx runs every statement of a multi-statement string; node:sqlite prepare() compiles only the first.
+        if (/^\s*BEGIN\b/.test(sql)) {
+          connection.exec(sql);
+          return { rowsAffected: 0, lastInsertId: 0 };
+        }
         const result = connection.prepare(sql).run(bind(sql, values));
         return { rowsAffected: Number(result.changes), lastInsertId: Number(result.lastInsertRowid) };
       },
@@ -106,6 +111,77 @@ function createPreviousDatabase(dbName) {
   `));
 }
 
+// The attendance schema written by the code before S8 (history action limited to late/excuse/present),
+// with rows: a c1 session where s1 arrived late then was excused (J) and s2 was a roll-call error,
+// and a c2 session where s4 was excused.
+function createPreviousAttendanceDatabase(dbName) {
+  createPreviousDatabase(dbName);
+  withConnection(dbName, (connection) => connection.exec(`
+    CREATE TABLE attendance_sessions (
+      id TEXT PRIMARY KEY NOT NULL,
+      course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      date TEXT NOT NULL,
+      start_time TEXT NOT NULL,
+      hours INTEGER NOT NULL CHECK (hours BETWEEN 1 AND 6),
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+    CREATE INDEX idx_attendance_sessions_course ON attendance_sessions (course_id, date);
+    CREATE TABLE attendance_marks (
+      session_id TEXT NOT NULL REFERENCES attendance_sessions(id) ON DELETE CASCADE,
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      hour INTEGER NOT NULL CHECK (hour BETWEEN 1 AND 6),
+      state TEXT NOT NULL CHECK (state IN ('present', 'absent', 'justified')),
+      PRIMARY KEY (session_id, student_id, hour)
+    );
+    CREATE INDEX idx_attendance_marks_student ON attendance_marks (student_id);
+    CREATE TABLE attendance_history (
+      id TEXT PRIMARY KEY NOT NULL,
+      session_id TEXT NOT NULL REFERENCES attendance_sessions(id) ON DELETE CASCADE,
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      action TEXT NOT NULL CHECK (action IN ('late', 'excuse', 'present')),
+      motive TEXT,
+      before_states TEXT NOT NULL,
+      after_states TEXT NOT NULL
+    );
+    CREATE INDEX idx_attendance_history_pair ON attendance_history (session_id, student_id);
+    CREATE VIEW attendance_roll_calls AS SELECT id AS session_id, course_id, date, start_time, hours, NULL AS marks FROM attendance_sessions WHERE 0;
+    CREATE TRIGGER attendance_roll_calls_insert INSTEAD OF INSERT ON attendance_roll_calls
+    BEGIN
+      SELECT RAISE(ABORT, 'Roll call does not match the session') WHERE EXISTS (
+        SELECT 1 FROM json_each(NEW.marks) s
+        WHERE json_array_length(s.value) <> NEW.hours
+          OR NOT EXISTS (SELECT 1 FROM students WHERE id = s.key AND course_id = NEW.course_id)
+      );
+      INSERT INTO attendance_sessions (id, course_id, date, start_time, hours) VALUES (NEW.session_id, NEW.course_id, NEW.date, NEW.start_time, NEW.hours);
+      INSERT INTO attendance_marks (session_id, student_id, hour, state)
+        SELECT NEW.session_id, s.key, h.key + 1, h.value FROM json_each(NEW.marks) s, json_each(s.value) h;
+    END;
+    CREATE TRIGGER attendance_history_apply AFTER INSERT ON attendance_history
+    BEGIN
+      SELECT RAISE(ABORT, 'Attendance changed since it was read') WHERE NEW.before_states IS NOT (
+        SELECT json_group_array(state) FROM (SELECT state FROM attendance_marks WHERE session_id = NEW.session_id AND student_id = NEW.student_id ORDER BY hour)
+      );
+      UPDATE attendance_marks SET state = json_extract(NEW.after_states, '$[' || (hour - 1) || ']')
+        WHERE session_id = NEW.session_id AND student_id = NEW.student_id;
+    END;
+    CREATE TRIGGER attendance_history_immutable BEFORE UPDATE ON attendance_history
+    BEGIN
+      SELECT RAISE(ABORT, 'Attendance history cannot be changed');
+    END;
+    INSERT INTO attendance_roll_calls (session_id, course_id, date, start_time, hours, marks) VALUES ('a1', 'c1', '2026-10-29', '15:00', 3, '{"s1":["absent","absent","absent"],"s2":["absent","present","present"],"s3":["present","present","present"]}');
+    INSERT INTO attendance_roll_calls (session_id, course_id, date, start_time, hours, marks) VALUES ('a2', 'c2', '2026-10-30', '08:00', 2, '{"s4":["absent","absent"]}');
+    INSERT INTO attendance_history (id, session_id, student_id, changed_at, action, motive, before_states, after_states) VALUES
+      ('h-late', 'a1', 's1', '2026-10-29T21:00:00.000Z', 'late', NULL, '["absent","absent","absent"]', '["absent","present","present"]');
+    INSERT INTO attendance_history (id, session_id, student_id, changed_at, action, motive, before_states, after_states) VALUES
+      ('h-excuse', 'a1', 's1', '2026-10-30T13:00:00.000Z', 'excuse', 'Permiso', '["absent","present","present"]', '["justified","present","present"]');
+    INSERT INTO attendance_history (id, session_id, student_id, changed_at, action, motive, before_states, after_states) VALUES
+      ('h-present', 'a1', 's2', '2026-10-30T13:05:00.000Z', 'present', NULL, '["absent","present","present"]', '["present","present","present"]');
+    INSERT INTO attendance_history (id, session_id, student_id, changed_at, action, motive, before_states, after_states) VALUES
+      ('h-c2', 'a2', 's4', '2026-10-31T09:00:00.000Z', 'excuse', 'Cita médica', '["absent","absent"]', '["justified","justified"]');
+  `));
+}
+
 const PREVIOUS_TABLES = ["courses", "campus_course_groups", "students", "periods", "grade_items", "grades", "groups", "group_members", "grade_history"];
 const ATTENDANCE_TABLES = ["attendance_sessions", "attendance_marks", "attendance_history"];
 
@@ -113,6 +189,15 @@ const rows = (connection, table) => connection.prepare(`SELECT * FROM ${table} O
 
 function snapshot(dbName, tables) {
   return withConnection(dbName, (connection) => Object.fromEntries(tables.map((table) => [table, rows(connection, table)])));
+}
+
+// Every row with its rowid and the storage type of every value, so a copy must be byte-identical and keep the order.
+function storedRows(dbName, tables) {
+  return withConnection(dbName, (connection) => Object.fromEntries(tables.map((table) => {
+    const columns = connection.prepare(`SELECT name FROM pragma_table_info('${table}')`).all().map((column) => column.name);
+    const typed = columns.map((column) => `typeof("${column}") AS "${column}:type", hex("${column}") AS "${column}:hex"`).join(", ");
+    return [table, connection.prepare(`SELECT rowid AS "rowid", *, ${typed} FROM ${table} ORDER BY rowid`).all().map((row) => ({ ...row }))];
+  })));
 }
 
 function schema(dbName) {
@@ -413,3 +498,155 @@ test("the history trigger rejects stale before_states and short after_states, an
   ins('["absent","absent","absent"]', '["absent","present","present"]');
   assert.throws(() => withConnection(dbName, (c) => c.exec("UPDATE attendance_history SET motive = 'x'")), /cannot be changed/);
 });
+
+// S8: the generic per-hour "edit" correction and the migration of the history action CHECK.
+const ALL_TABLES = [...PREVIOUS_TABLES, ...ATTENDANCE_TABLES];
+const ATTENDANCE_OBJECTS = ["attendance_sessions", "attendance_marks", "attendance_history", "idx_attendance_sessions_course", "idx_attendance_marks_student", "idx_attendance_history_pair", "attendance_roll_calls", "attendance_roll_calls_insert", "attendance_history_apply", "attendance_history_immutable"];
+
+async function freshSchema() {
+  const dbName = `fresh-${++databases}.db`;
+  createPreviousDatabase(dbName);
+  await openDb(dbName);
+  return schema(dbName);
+}
+
+test("initDatabase migrates a previous attendance_history keeping every row byte-identical and the same schema as a new database (S8)", async () => {
+  const dbName = "migrate-history.db";
+  createPreviousAttendanceDatabase(dbName);
+  const before = storedRows(dbName, ALL_TABLES);
+  const schemaBefore = schema(dbName);
+  assert.match(schemaBefore.find((entry) => entry.name === "attendance_history").sql, /CHECK \(action IN \('late', 'excuse', 'present'\)\)/);
+
+  await openDb(dbName);
+
+  assert.deepEqual(storedRows(dbName, ALL_TABLES), before);
+  const schemaAfter = schema(dbName);
+  assert.deepEqual(schemaAfter.map((entry) => `${entry.type} ${entry.name}`), schemaBefore.map((entry) => `${entry.type} ${entry.name}`));
+  for (const entry of schemaBefore.filter((item) => !item.name.startsWith("attendance_history") && item.name !== "idx_attendance_history_pair")) {
+    assert.deepEqual(schemaAfter.find((item) => item.name === entry.name), entry);
+  }
+  const fresh = await freshSchema();
+  for (const name of ATTENDANCE_OBJECTS) assert.deepEqual(schemaAfter.find((item) => item.name === name), fresh.find((item) => item.name === name), name);
+  assert.match(schemaAfter.find((entry) => entry.name === "attendance_history").sql, /CHECK \(action IN \('late', 'excuse', 'present', 'edit'\)\)/);
+});
+
+test("a migrated database keeps its sessions, justified marks and old history, and accepts edits (S8)", async () => {
+  const dbName = "migrate-edit.db";
+  createPreviousAttendanceDatabase(dbName);
+  const db = await openDb(dbName);
+
+  assert.deepEqual(await marksOf(db, "a1", "s1"), ["justified", "present", "present"]);
+  assert.deepEqual((await db.listAttendanceHistory("a1", "s1")).map(({ id, action, motive }) => ({ id, action, motive })), [
+    { id: "h-excuse", action: "excuse", motive: "Permiso" },
+    { id: "h-late", action: "late", motive: null },
+  ]);
+  assert.deepEqual((await db.courseAttendanceTotals("c1")).find((total) => total.studentId === "s1"), { studentId: "s1", absentHours: 0, justifiedHours: 1, recordedHours: 3 });
+
+  await db.correctAttendance("a1", "s1", { action: "edit", states: ["justified", "present", "absent"] });
+
+  assert.deepEqual(await marksOf(db, "a1", "s1"), ["justified", "present", "absent"]);
+  const history = await db.listAttendanceHistory("a1", "s1");
+  assert.deepEqual(history.map(({ action, motive, beforeStates, afterStates }) => ({ action, motive, beforeStates, afterStates }))[0], { action: "edit", motive: null, beforeStates: ["justified", "present", "present"], afterStates: ["justified", "present", "absent"] });
+  assert.deepEqual(history.map((entry) => entry.id).slice(1), ["h-excuse", "h-late"]);
+});
+
+test("the migrated history triggers behave like before: stale before_states abort and rows cannot be updated (S8)", async () => {
+  const dbName = "migrate-triggers.db";
+  createPreviousAttendanceDatabase(dbName);
+  await openDb(dbName);
+  const before = storedRows(dbName, ATTENDANCE_TABLES);
+  const ins = (beforeStates, afterStates) => withConnection(dbName, (c) => c.prepare("INSERT INTO attendance_history (id, session_id, student_id, action, before_states, after_states) VALUES (?, 'a1', 's3', 'edit', ?, ?)").run(crypto.randomUUID(), beforeStates, afterStates));
+
+  assert.throws(() => ins('["absent","present","present"]', '["absent","absent","absent"]'), /changed since it was read/);
+  assert.throws(() => withConnection(dbName, (c) => c.exec("UPDATE attendance_history SET motive = 'x'")), /cannot be changed/);
+  assert.throws(() => withConnection(dbName, (c) => c.prepare("INSERT INTO attendance_history (id, session_id, student_id, action, before_states, after_states) VALUES ('x', 'a1', 's3', 'delete', '[\"present\",\"present\",\"present\"]', '[\"absent\",\"absent\",\"absent\"]')").run()), /CHECK constraint/);
+  assert.deepEqual(storedRows(dbName, ATTENDANCE_TABLES), before);
+  ins('["present","present","present"]', '["absent","absent","absent"]');
+  assert.deepEqual(withConnection(dbName, (c) => c.prepare("SELECT state FROM attendance_marks WHERE session_id = 'a1' AND student_id = 's3' ORDER BY hour").all().map((row) => row.state)), ["absent", "absent", "absent"]);
+});
+
+test("running initDatabase again on a migrated database changes nothing (S8)", async () => {
+  const dbName = "migrate-twice.db";
+  createPreviousAttendanceDatabase(dbName);
+  const db = await openDb(dbName);
+  const before = storedRows(dbName, ALL_TABLES);
+  const schemaBefore = schema(dbName);
+  const statements = [];
+  globalThis.__notazodBeforeExecute = (sql) => statements.push(sql);
+
+  await db.initDatabase();
+  await openDb(dbName);
+
+  globalThis.__notazodBeforeExecute = null;
+  assert.equal(statements.some((sql) => /attendance_history_old|DROP TABLE/.test(sql)), false);
+  assert.deepEqual(schema(dbName), schemaBefore);
+  assert.deepEqual(storedRows(dbName, ALL_TABLES), before);
+});
+
+test("the history migration is one atomic step: when it fails nothing changes (S8)", async () => {
+  const dbName = "migrate-fails.db";
+  createPreviousAttendanceDatabase(dbName);
+  // A stray table with the name the migration needs makes its rename fail half-way.
+  withConnection(dbName, (connection) => connection.exec("CREATE TABLE attendance_history_old (x TEXT)"));
+  const before = storedRows(dbName, [...ALL_TABLES, "attendance_history_old"]);
+  const schemaBefore = schema(dbName);
+
+  const error = await rejectionOf(openDb(dbName));
+
+  assert.match(error?.message ?? "", /attendance_history_old/);
+  assert.deepEqual(schema(dbName), schemaBefore);
+  assert.deepEqual(storedRows(dbName, [...ALL_TABLES, "attendance_history_old"]), before);
+});
+
+test("deleteCourse on a migrated database removes the course's attendance and history and keeps the others (S8)", async () => {
+  const dbName = "migrate-delete.db";
+  createPreviousAttendanceDatabase(dbName);
+  const db = await openDb(dbName);
+  await db.correctAttendance("a1", "s3", { action: "edit", states: ["present", "absent", "absent"] });
+
+  await db.deleteCourse("c1");
+
+  const after = storedRows(dbName, ATTENDANCE_TABLES);
+  assert.deepEqual(after.attendance_sessions.map((row) => row.id), ["a2"]);
+  assert.deepEqual(after.attendance_marks.map((row) => row.student_id), ["s4", "s4"]);
+  assert.deepEqual(after.attendance_history.map((row) => row.id), ["h-c2"]);
+});
+
+for (const [label, studentId, states, expected] of [
+  ["left early", "s3", ["present", "present", "absent"], ["present", "present", "absent"]],
+  ["did not come", "s3", ["absent", "absent", "absent"], ["absent", "absent", "absent"]],
+  ["arrived later", "s1", ["absent", "present", "present"], ["absent", "present", "present"]],
+]) {
+  test(`an edit stores exactly the hours given: ${label} (S8)`, async () => {
+    const { dbName, db, session } = await seeded();
+    const beforeStates = await marksOf(db, session.id, studentId);
+    const others = (await db.listAttendanceMarks(session.id)).filter((mark) => mark.studentId !== studentId);
+
+    assert.deepEqual(await db.correctAttendance(session.id, studentId, { action: "edit", states }), expected);
+
+    assert.deepEqual(await marksOf(db, session.id, studentId), expected);
+    assert.deepEqual((await db.listAttendanceMarks(session.id)).filter((mark) => mark.studentId !== studentId), others);
+    const history = await db.listAttendanceHistory(session.id, studentId);
+    assert.deepEqual(history.map(({ action, motive, beforeStates: b, afterStates }) => ({ action, motive, beforeStates: b, afterStates })), [{ action: "edit", motive: null, beforeStates, afterStates: expected }]);
+    assert.equal(storedRows(dbName, ["attendance_history"]).attendance_history.length, 1);
+  });
+}
+
+for (const [label, studentId, states, message] of [
+  ["an edit that changes nothing", "s3", ["present", "present", "present"], "The correction does not change any hour"],
+  ["an edit with too few hours", "s3", ["absent", "absent"], "An edit needs one state per hour"],
+  ["an edit with too many hours", "s3", ["absent", "absent", "absent", "absent"], "An edit needs one state per hour"],
+  ["an edit without states", "s3", undefined, "An edit needs one state per hour"],
+  ["an edit with an unknown state", "s3", ["present", "late", "present"], "Invalid attendance state for hour 2: late"],
+  ["an edit that justifies an hour", "s1", ["justified", "absent", "absent"], "Invalid attendance state for hour 1: justified"],
+]) {
+  test(`correctAttendance rejects ${label} without writing (S8)`, async () => {
+    const { dbName, db, session } = await seeded();
+    const before = storedRows(dbName, ALL_TABLES);
+
+    const error = await rejectionOf(db.correctAttendance(session.id, studentId, { action: "edit", states }));
+
+    assert.equal(error?.message, message);
+    assert.deepEqual(storedRows(dbName, ALL_TABLES), before);
+  });
+}

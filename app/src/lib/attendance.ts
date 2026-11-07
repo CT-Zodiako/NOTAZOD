@@ -4,12 +4,13 @@ import { dayLabel, formatTime, parseSchedule } from "./schedule.ts";
 // A session has 1-6 class hours; each student has one state per hour and every absent hour is one absence.
 export const ATTENDANCE_STATES = ["present", "absent", "justified"] as const;
 export type AttendanceState = (typeof ATTENDANCE_STATES)[number];
-export const ATTENDANCE_ACTIONS = ["late", "excuse", "present"] as const;
+export const ATTENDANCE_ACTIONS = ["late", "excuse", "present", "edit"] as const;
 export type AttendanceAction = (typeof ATTENDANCE_ACTIONS)[number];
 export type AttendanceCorrection =
   | { action: "late"; arrivalHour: number }
   | { action: "excuse"; motive: string }
-  | { action: "present" };
+  | { action: "present" }
+  | { action: "edit"; states: AttendanceState[] };
 
 export const MIN_SESSION_HOURS = 1;
 export const MAX_SESSION_HOURS = 6;
@@ -64,7 +65,16 @@ export function lateArrivalStates(hours: number, arrivalHour: number): Attendanc
   return Array.from({ length: hours }, (_, index) => index + 1 < arrivalHour ? "absent" : "present");
 }
 
-// S3, S4: the states after a correction. Rejects an empty motive, an unknown action and a correction that changes nothing.
+// S8: an edit sets every hour present or absent; an already justified hour may stay justified.
+function editedStates(states: AttendanceState[], edited: unknown): AttendanceState[] {
+  if (!Array.isArray(edited) || edited.length !== states.length) throw new Error("An edit needs one state per hour");
+  edited.forEach((state, index) => {
+    if (state !== "present" && state !== "absent" && !(state === "justified" && states[index] === "justified")) throw new Error(`Invalid attendance state for hour ${index + 1}: ${state}`);
+  });
+  return [...edited];
+}
+
+// S3, S4, S8: the states after a correction. Rejects an empty motive, an invalid edit, an unknown action and a correction that changes nothing.
 export function applyCorrection(states: AttendanceState[], correction: AttendanceCorrection): AttendanceState[] {
   let next: AttendanceState[];
   switch (correction.action) {
@@ -78,6 +88,9 @@ export function applyCorrection(states: AttendanceState[], correction: Attendanc
     case "present":
       next = states.map(() => "present");
       break;
+    case "edit":
+      next = editedStates(states, correction.states);
+      break;
     default:
       throw new Error(`Unknown attendance correction: ${(correction as { action: unknown }).action}`);
   }
@@ -85,35 +98,9 @@ export function applyCorrection(states: AttendanceState[], correction: Attendanc
   return next;
 }
 
-// Design 04 (asistencia/04-corregir-tocando-horas): the dialog edits the hours and asks why.
-export type CorrectionReason = "late" | "excuse" | "error";
-export type CorrectionPlan = { correction: AttendanceCorrection; after: AttendanceState[] } | { hint: string };
-
-// Tapping an hour in the correction dialog: absent <-> present, a justified hour becomes present.
+// Tapping an hour in the correction dialog (S8): absent <-> present, a justified hour becomes present.
 export function toggleCorrectionHour(states: AttendanceState[], index: number): AttendanceState[] {
   return states.map((state, position) => position === index ? (state === "present" ? "absent" : "present") : state);
-}
-
-// Maps the edited hours and the chosen reason to one stored correction, or explains what is missing.
-export function planCorrection(before: AttendanceState[], edited: AttendanceState[], reason: CorrectionReason | null, motive: string): CorrectionPlan {
-  if (!reason) return { hint: "Elegí por qué cambia." };
-  let correction: AttendanceCorrection;
-  if (reason === "late") {
-    const arrival = edited.indexOf("present");
-    const isLateArrival = arrival >= 0 && edited.every((state, index) => state === (index < arrival ? "absent" : "present"));
-    if (!isLateArrival) return { hint: "Para «Llegó tarde» dejá en falta las horas antes de que llegara y en presente desde que llegó." };
-    correction = { action: "late", arrivalHour: arrival + 1 };
-  } else if (reason === "excuse") {
-    if (!motive.trim()) return { hint: "Escribí el motivo de la excusa." };
-    correction = { action: "excuse", motive: motive.trim() };
-  } else {
-    correction = { action: "present" };
-  }
-  try {
-    return { correction, after: applyCorrection(before, correction) };
-  } catch {
-    return { hint: "Esta corrección no cambia ninguna hora." };
-  }
 }
 
 // "15:00" and hour index 1 -> "16:00–17:00"; empty when the start time is not HH:MM.
@@ -169,8 +156,11 @@ export function formatSessionDate(date: string): string {
   return parsed ? `${dayLabel(parsed.getDay())} ${parsed.getDate()} ${MONTH_LABELS[parsed.getMonth()]}` : date;
 }
 
+const STATE_MARKS: Record<AttendanceState, string> = { present: "✓", absent: "F", justified: "J" };
+
 export function describeHistoryEntry(entry: { action: AttendanceAction; motive: string | null; beforeStates: AttendanceState[]; afterStates: AttendanceState[] }): string {
   const before = `(antes ${plural(stateCounts(entry.beforeStates).absent, "falta", "faltas")})`;
+  if (entry.action === "edit") return `Corregida: ${entry.afterStates.map((state) => STATE_MARKS[state]).join(" ")} ${before}`;
   if (entry.action === "late") return `Llegó tarde: presente desde la hora ${entry.afterStates.indexOf("present") + 1} ${before}`;
   if (entry.action === "excuse") return `Justificada: ${entry.motive ?? ""} ${before}`;
   return `Sí vino: presente en todas las horas ${before}`;

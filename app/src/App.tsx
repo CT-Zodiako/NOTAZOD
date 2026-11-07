@@ -24,7 +24,6 @@ import {
   Switch,
   Table,
   Text,
-  Textarea,
   TextInput,
   Title,
   Tooltip,
@@ -36,7 +35,7 @@ import { currentSemester, planCourseSync, SyncAction } from "./lib/campusSync";
 import { hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
 import { campusStateFor, COURSE_COLOR_SWATCHES, courseColorStyle, countByFilter, hasPendingGrade, heatTint, isAtRisk, matchesFilter, STUDENT_FILTER, StudentFilter, StudentStatus } from "./lib/studentList";
 import { buildWeek, dayLabel, formatTime, nextClass, nextClassLabel, weekdayName } from "./lib/schedule";
-import { absenceLabel, AttendanceState, CorrectionReason, hourRangeLabel, lateArrivalStates, planCorrection, toggleCorrectionHour, courseTotalLabel, defaultSessionTiming, describeHistoryEntry, formatSessionDate, isValidSessionHours, MAX_SESSION_HOURS, MIN_SESSION_HOURS, resizeStates, rollCallDefaults, rollCallSummary, sessionLabel, stateCounts, toggleHour, toggleStudent } from "./lib/attendance";
+import { absenceLabel, AttendanceState, hourRangeLabel, lateArrivalStates, toggleCorrectionHour, courseTotalLabel, defaultSessionTiming, describeHistoryEntry, formatSessionDate, isValidSessionHours, MAX_SESSION_HOURS, MIN_SESSION_HOURS, resizeStates, rollCallDefaults, rollCallSummary, sessionLabel, stateCounts, toggleHour, toggleStudent } from "./lib/attendance";
 
 const studentFilterOptions: { key: StudentFilter; label: string; description: string }[] = [
   { key: STUDENT_FILTER.ALL, label: "Todos", description: "Todos los estudiantes del corte" },
@@ -1860,17 +1859,9 @@ function AttendanceView({ courseId, students, reload, focusSessionId }: { course
   );
 }
 
-const correctionReasons = [
-  { reason: "late", label: "Llegó tarde" },
-  { reason: "excuse", label: "Tiene excusa" },
-  { reason: "error", label: "Error de lista" },
-] as const;
-
-// Design 04: tap each hour (with its real time) like the roll call, say why it changes, and see Antes → Ahora.
+// S8: tap each hour (with its real time) ✓/F and see Antes → Ahora; saved as one "edit" correction.
 function CorrectionForm({ session, student, states, onCancel, onSaved }: { session: AttendanceSession; student: Student; states: AttendanceState[]; onCancel: () => void; onSaved: () => void }) {
   const [edited, setEdited] = useState<AttendanceState[]>(states);
-  const [reason, setReason] = useState<CorrectionReason | null>(null);
-  const [motive, setMotive] = useState("");
   const [history, setHistory] = useState<AttendanceHistoryEntry[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -1883,34 +1874,13 @@ function CorrectionForm({ session, student, states, onCancel, onSaved }: { sessi
     return () => { current = false; };
   }, [session.id, student.id]);
 
-  const plan = planCorrection(states, edited, reason, motive);
-  const after = "after" in plan ? plan.after : null;
-  // With an excuse the absent hours turn J; otherwise the buttons show what was tapped.
-  const shown = reason === "excuse" ? states.map((state) => state === "absent" ? "justified" : state) : edited;
-
-  function tapHour(index: number) {
-    setEdited((current) => toggleCorrectionHour(reason === "excuse" ? states : current, index));
-    if (reason === "excuse" || reason === "error") setReason(null);
-  }
-
-  function chooseReason(next: CorrectionReason) {
-    setReason(next);
-    if (next === "excuse") setEdited(states);
-    if (next === "error") setEdited(states.map(() => "present"));
-  }
-
-  function shortcut(arrivalHour: number) {
-    if (arrivalHour === 1) { chooseReason("error"); return; }
-    setEdited(states.map((_, index) => index + 1 < arrivalHour ? "absent" : "present"));
-    setReason("late");
-  }
+  const changed = edited.some((state, index) => state !== states[index]);
 
   async function save() {
-    if (!("correction" in plan)) return;
     setSaving(true);
     setSaveError("");
     try {
-      await correctAttendance(session.id, student.id, plan.correction);
+      await correctAttendance(session.id, student.id, { action: "edit", states: edited });
       onSaved();
     } catch (cause) {
       setSaveError(`No se pudo guardar la corrección. No se cambió nada. Detalle: ${errorDetail(cause)}`);
@@ -1918,9 +1888,6 @@ function CorrectionForm({ session, student, states, onCancel, onSaved }: { sessi
     }
   }
 
-  const beforeAbsences = stateCounts(states).absent;
-  const afterStates = after ?? shown;
-  const afterAbsences = stateCounts(afterStates).absent;
   return (
     <Stack gap="sm">
       <Group justify="space-between" align="baseline" gap="xs">
@@ -1928,34 +1895,20 @@ function CorrectionForm({ session, student, states, onCancel, onSaved }: { sessi
         <Text c="dimmed" size="sm">{formatSessionDate(session.date)} · {session.hours} {session.hours === 1 ? "hora" : "horas"}{hourRangeLabel(session.startTime, 0) ? ` · desde ${session.startTime}` : ""}</Text>
       </Group>
       <div className="correction-hours" role="group" aria-label="Horas de la clase">
-        {shown.map((state, index) => (
+        {edited.map((state, index) => (
           <div key={index} className="correction-hour">
-            <button type="button" className="correction-hour-button" data-state={state} data-changed={state !== states[index] || undefined} aria-label={`Hora ${index + 1}: ${hourStateLabels[state]}. Tocá para cambiarla.`} onClick={() => tapHour(index)}>{hourStateMarks[state]}</button>
+            <button type="button" className="correction-hour-button" data-state={state} data-changed={state !== states[index] || undefined} aria-label={`Hora ${index + 1}: ${hourStateLabels[state]}. Tocá para cambiarla.`} onClick={() => setEdited((current) => toggleCorrectionHour(current, index))}>{hourStateMarks[state]}</button>
             <small>Hora {index + 1}{hourRangeLabel(session.startTime, index) ? <><br />{hourRangeLabel(session.startTime, index)}</> : null}</small>
           </div>
         ))}
       </div>
-      <Text ta="center" c="dimmed" size="sm">Tocá cada hora para cambiarla: <b>F</b> falta · <b>✓</b> presente</Text>
-      <Group justify="center" gap={6}>
-        <Button size="compact-sm" variant="default" className="correction-shortcut" onClick={() => shortcut(1)}>Vino toda la clase</Button>
-        {states.slice(1).map((_, index) => (
-          <Button key={index} size="compact-sm" variant="default" className="correction-shortcut" onClick={() => shortcut(index + 2)}>Llegó en la {index + 2}.ª hora{hourRangeLabel(session.startTime, index + 1) ? ` (${hourRangeLabel(session.startTime, index + 1).split("–")[0]})` : ""}</Button>
-        ))}
-      </Group>
-      <Text size="sm" fw={700}>¿Por qué cambia?</Text>
-      <Group gap="xs" role="group" aria-label="Motivo del cambio">
-        {correctionReasons.map((option) => (
-          <Button key={option.reason} radius="xl" variant={reason === option.reason ? "light" : "default"} aria-pressed={reason === option.reason} onClick={() => chooseReason(option.reason)}>{option.label}</Button>
-        ))}
-      </Group>
-      {reason === "excuse" ? <Textarea autosize minRows={2} aria-label="Motivo de la excusa" placeholder="Motivo de la excusa (obligatorio): incapacidad médica, permiso…" value={motive} onChange={(event) => setMotive(event.currentTarget.value)} required /> : null}
+      <Text ta="center" c="dimmed" size="sm">Tocá cada hora para cambiarla: <b>✓</b> vino · <b>F</b> no vino</Text>
       <div className="correction-compare" aria-live="polite">
         <div><span className="correction-compare-label">Antes</span><HourMarks states={states} /></div>
         <span className="correction-compare-arrow" aria-hidden="true">→</span>
-        <div><span className="correction-compare-label">Ahora</span><HourMarks states={afterStates} /></div>
+        <div><span className="correction-compare-label">Ahora</span><HourMarks states={edited} /></div>
       </div>
-      <Text ta="center" size="sm">Faltas en esta clase: <b>{beforeAbsences}</b> → <b>{afterAbsences}</b>{afterStates.includes("justified") ? " · las J quedan justificadas (no cuentan)" : ""}</Text>
-      {"hint" in plan ? <Text ta="center" c="red" size="sm">{plan.hint}</Text> : null}
+      <Text ta="center" size="sm">Faltas en esta clase: <b>{stateCounts(states).absent}</b> → <b>{stateCounts(edited).absent}</b></Text>
       <p className="sidebar-label attendance-history-label"><Icon name="history" />Historial</p>
       <ul className="attendance-history">
         {history === null ? <li>Cargando…</li> : history.length ? history.map((entry) => (
@@ -1965,7 +1918,7 @@ function CorrectionForm({ session, student, states, onCancel, onSaved }: { sessi
       {saveError ? <Text c="red" size="sm" role="alert">{saveError}</Text> : null}
       <Group justify="flex-end" gap="xs">
         <Button variant="default" onClick={onCancel}>Cancelar</Button>
-        <Button loading={saving} disabled={!after} onClick={() => void save()}>Guardar corrección</Button>
+        <Button loading={saving} disabled={!changed} onClick={() => void save()}>Guardar corrección</Button>
       </Group>
     </Stack>
   );
