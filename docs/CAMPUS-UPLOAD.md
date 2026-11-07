@@ -32,6 +32,7 @@ The result shows, per course, `Corte N: subidas/total` and the students that are
 - A group whose students are mostly in one course of the current semester only adds the students that course is missing. Several Campus groups can complete the same course.
 - A group with no matching course becomes a new course named after its first module (the group is appended if the name would repeat).
 - Nothing is deleted or modified. Students that are in NOTAZOD but not in the Campus, rows with missing or invalid data, and groups split across courses are only reported.
+- Students are unique per course, not globally: the same student, with the same code, name and emails, can be in several courses with independent grades. Inside one course no two students may share a code, document or email. A student may have the same address in CORREO 1 and CORREO 2. A rejected row names the field and who already has it, e.g. "Documento 1061234567 ya lo tiene PEREZ ANA (90221016) en este curso."
 - Periods already closed in the Campus (the grade columns before the open one) are imported only into NOTAZOD periods that have no grades yet: one activity **Nota del Campus** with each student's Campus value, the split set to Actividades 100% / Parcial 0%, and the period closed, so the period and accumulated grades match the Campus. A period that already has grades in NOTAZOD is never changed. Later periods are ignored.
 - A preview comes first; **Crear y agregar** takes an internal backup and then creates the courses and students.
 

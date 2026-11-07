@@ -26,12 +26,43 @@ export function hasErrors(errors: StudentValidation) {
   return Object.keys(errors).length > 0;
 }
 
+const uniqueFields = [
+  { key: "code", label: "Código" },
+  { key: "documentId", label: "Documento" },
+  { key: "institutionalEmail", label: "Correo institucional" },
+  { key: "personalEmail", label: "Correo personal" },
+] as const;
+
+type Owner = { fullName: string; code: string; where: "en este curso" | "en esta misma lista" };
+
+// Uniqueness is per course: a student may be in several courses with the same data. Inside one course no
+// two students may share a code, document or email. One student may repeat an email in both email fields.
+function findClash(row: StudentDraft, owners: Map<string, Owner>) {
+  const values = uniqueFields.map(({ key, label }) => ({ label, value: row[key].trim(), lower: row[key].trim().toLowerCase() }));
+  for (const [i, a] of values.entries()) {
+    for (const b of values.slice(i + 1)) {
+      const bothEmails = a.label.startsWith("Correo") && b.label.startsWith("Correo");
+      if (a.lower === b.lower && !bothEmails) return `${a.label} y ${b.label.toLowerCase()} son iguales (${a.value}).`;
+    }
+  }
+  for (const { label, value, lower } of values) {
+    const owner = owners.get(lower);
+    if (owner) return `${label} ${value} ya lo tiene ${owner.fullName} (${owner.code}) ${owner.where}.`;
+  }
+  return null;
+}
+
 export function classifyStudentRows(rows: StudentDraft[], existing: Student[]) {
   const valid: StudentDraft[] = [];
   const incomplete: Array<{ row: StudentDraft; reason: string }> = [];
   const invalid: Array<{ row: StudentDraft; reason: string }> = [];
   const duplicate: Array<{ row: StudentDraft; reason: string }> = [];
-  const seen = new Set(existing.flatMap((item) => [item.code, item.documentId, item.institutionalEmail, item.personalEmail].map((value) => value.toLowerCase())));
+  const owners = new Map<string, Owner>();
+  const claim = (student: StudentDraft, where: Owner["where"]) => uniqueFields.forEach(({ key }) => {
+    const lower = student[key].trim().toLowerCase();
+    if (!owners.has(lower)) owners.set(lower, { fullName: student.fullName, code: student.code, where });
+  });
+  existing.forEach((item) => claim(item, "en este curso"));
 
   rows.forEach((row) => {
     const required: Array<keyof StudentDraft> = ["fullName", "code", "documentId", "institutionalEmail", "personalEmail"];
@@ -39,11 +70,9 @@ export function classifyStudentRows(rows: StudentDraft[], existing: Student[]) {
     if (missing.length) { incomplete.push({ row, reason: `Falta: ${missing.join(", ")}.` }); return; }
     const badEmail = [row.institutionalEmail, row.personalEmail].find((email) => !emailPattern.test(email));
     if (badEmail) { invalid.push({ row, reason: `Correo inválido: ${badEmail}.` }); return; }
-    const values = [row.code, row.documentId, row.institutionalEmail, row.personalEmail].map((value) => value.toLowerCase());
-    if (values.some((value) => seen.has(value)) || new Set(values).size !== values.length) {
-      duplicate.push({ row, reason: "Coincide con un estudiante existente o repetido en el archivo." }); return;
-    }
-    values.forEach((value) => seen.add(value));
+    const clash = findClash(row, owners);
+    if (clash) { duplicate.push({ row, reason: clash }); return; }
+    claim(row, "en esta misma lista");
     valid.push(row);
   });
   return { valid, incomplete, invalid, duplicate };
