@@ -1,6 +1,7 @@
 import Database from "@tauri-apps/plugin-sql";
 import { invoke } from "@tauri-apps/api/core";
 import type { CampusGroupMetadata, ExistingCourse, SyncAction } from "./campusSync";
+import { applyCorrection, isAttendanceState, isValidSessionHours, isValidStartTime, parseSessionDate, type AttendanceAction, type AttendanceCorrection, type AttendanceState } from "./attendance.ts";
 
 // Palette keys a course color may take (S11, S13), in palette order; App maps each one to a design token.
 export const COURSE_COLORS = ["primary", "pink", "warning", "focus", "brown", "olive", "passing", "teal", "blue", "indigo", "pending", "locked"] as const;
@@ -47,6 +48,10 @@ export type GradeHistoryEntry = {
 };
 export type Group = { id: string; periodId: string; name: string; sortOrder: number };
 export type GroupMembership = { groupId: string; studentId: string };
+export type AttendanceSession = { id: string; courseId: string; date: string; startTime: string; hours: number; createdAt: string; absentStudents: number; absentHours: number };
+export type AttendanceMark = { studentId: string; hour: number; state: AttendanceState };
+export type AttendanceTotal = { studentId: string; absentHours: number; justifiedHours: number; recordedHours: number };
+export type AttendanceHistoryEntry = { id: string; sessionId: string; studentId: string; changedAt: string; action: AttendanceAction; motive: string | null; beforeStates: AttendanceState[]; afterStates: AttendanceState[] };
 
 let connection: Database | null = null;
 
@@ -199,6 +204,79 @@ export async function initDatabase() {
     );
   `);
   await db.execute("CREATE INDEX IF NOT EXISTS idx_grade_history_pair ON grade_history (student_id, item_id)");
+  await createAttendanceSchema(db);
+}
+
+// Attendance (S2, S5, S7): new tables only. Times are stored as ISO UTC text.
+async function createAttendanceSchema(db: Database) {
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS attendance_sessions (
+      id TEXT PRIMARY KEY NOT NULL,
+      course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      date TEXT NOT NULL,
+      start_time TEXT NOT NULL,
+      hours INTEGER NOT NULL CHECK (hours BETWEEN 1 AND 6),
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+  `);
+  await db.execute("CREATE INDEX IF NOT EXISTS idx_attendance_sessions_course ON attendance_sessions (course_id, date)");
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS attendance_marks (
+      session_id TEXT NOT NULL REFERENCES attendance_sessions(id) ON DELETE CASCADE,
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      hour INTEGER NOT NULL CHECK (hour BETWEEN 1 AND 6),
+      state TEXT NOT NULL CHECK (state IN ('present', 'absent', 'justified')),
+      PRIMARY KEY (session_id, student_id, hour)
+    );
+  `);
+  await db.execute("CREATE INDEX IF NOT EXISTS idx_attendance_marks_student ON attendance_marks (student_id)");
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS attendance_history (
+      id TEXT PRIMARY KEY NOT NULL,
+      session_id TEXT NOT NULL REFERENCES attendance_sessions(id) ON DELETE CASCADE,
+      student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      changed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      action TEXT NOT NULL CHECK (action IN ('late', 'excuse', 'present')),
+      motive TEXT,
+      before_states TEXT NOT NULL,
+      after_states TEXT NOT NULL
+    );
+  `);
+  await db.execute("CREATE INDEX IF NOT EXISTS idx_attendance_history_pair ON attendance_history (session_id, student_id)");
+  // The plugin cannot hold a transaction across execute() calls, so a roll call is one INSERT into this
+  // view: its trigger writes the session and every mark ({ studentId: [state per hour] }) in that statement.
+  await db.execute("CREATE VIEW IF NOT EXISTS attendance_roll_calls AS SELECT id AS session_id, course_id, date, start_time, hours, NULL AS marks FROM attendance_sessions WHERE 0");
+  await db.execute(`
+    CREATE TRIGGER IF NOT EXISTS attendance_roll_calls_insert INSTEAD OF INSERT ON attendance_roll_calls
+    BEGIN
+      SELECT RAISE(ABORT, 'Roll call does not match the session') WHERE EXISTS (
+        SELECT 1 FROM json_each(NEW.marks) s
+        WHERE json_array_length(s.value) <> NEW.hours
+          OR NOT EXISTS (SELECT 1 FROM students WHERE id = s.key AND course_id = NEW.course_id)
+      );
+      INSERT INTO attendance_sessions (id, course_id, date, start_time, hours) VALUES (NEW.session_id, NEW.course_id, NEW.date, NEW.start_time, NEW.hours);
+      INSERT INTO attendance_marks (session_id, student_id, hour, state)
+        SELECT NEW.session_id, s.key, h.key + 1, h.value FROM json_each(NEW.marks) s, json_each(s.value) h;
+    END
+  `);
+  // Likewise a correction is one INSERT into the history: its trigger applies after_states to the marks,
+  // and aborts when the marks no longer match before_states (changed since they were read).
+  await db.execute(`
+    CREATE TRIGGER IF NOT EXISTS attendance_history_apply AFTER INSERT ON attendance_history
+    BEGIN
+      SELECT RAISE(ABORT, 'Attendance changed since it was read') WHERE NEW.before_states IS NOT (
+        SELECT json_group_array(state) FROM (SELECT state FROM attendance_marks WHERE session_id = NEW.session_id AND student_id = NEW.student_id ORDER BY hour)
+      );
+      UPDATE attendance_marks SET state = json_extract(NEW.after_states, '$[' || (hour - 1) || ']')
+        WHERE session_id = NEW.session_id AND student_id = NEW.student_id;
+    END
+  `);
+  await db.execute(`
+    CREATE TRIGGER IF NOT EXISTS attendance_history_immutable BEFORE UPDATE ON attendance_history
+    BEGIN
+      SELECT RAISE(ABORT, 'Attendance history cannot be changed');
+    END
+  `);
 }
 
 export async function listCourses(): Promise<Course[]> {
@@ -262,6 +340,11 @@ const COURSE_CASCADE_KEYS = [
   "group_members.student_id -> students",
   "grade_history.student_id -> students",
   "grade_history.item_id -> grade_items",
+  "attendance_sessions.course_id -> courses",
+  "attendance_marks.session_id -> attendance_sessions",
+  "attendance_marks.student_id -> students",
+  "attendance_history.session_id -> attendance_sessions",
+  "attendance_history.student_id -> students",
 ];
 
 // Every foreign key an activity deletion must cascade through.
@@ -663,6 +746,93 @@ export async function saveGroupGrade(groupId: string, itemId: string, value: num
   );
 
   return members.map((member) => ({ studentId: member.studentId, itemId, value, pending }));
+}
+
+const ATTENDANCE_SESSION_COLUMNS = `s.id, s.course_id AS courseId, s.date, s.start_time AS startTime, s.hours, s.created_at AS createdAt,
+  (SELECT COUNT(DISTINCT m.student_id) FROM attendance_marks m WHERE m.session_id = s.id AND m.state = 'absent') AS absentStudents,
+  (SELECT COUNT(*) FROM attendance_marks m WHERE m.session_id = s.id AND m.state = 'absent') AS absentHours`;
+
+async function fetchAttendanceSession(db: Database, sessionId: string): Promise<AttendanceSession | null> {
+  const rows = await db.select<AttendanceSession[]>(`SELECT ${ATTENDANCE_SESSION_COLUMNS} FROM attendance_sessions s WHERE s.id = $1`, [sessionId]);
+  return rows[0] ?? null;
+}
+
+// S1, S2, S7: validates everything first, then writes the session and one mark per current student per hour
+// in a single statement. absentHoursByStudent lists 1-based absent hours; unlisted students are present.
+export async function createAttendanceSession(courseId: string, timing: { date: string; startTime: string; hours: number }, absentHoursByStudent: Record<string, number[]>): Promise<AttendanceSession> {
+  const db = await getDatabase();
+  const course = await db.select<{ id: string }[]>("SELECT id FROM courses WHERE id = $1", [courseId]);
+  if (!course[0]) throw new Error("Course not found");
+  if (!isValidSessionHours(timing.hours)) throw new Error("Class hours must be a whole number from 1 to 6");
+  if (typeof timing.date !== "string" || !parseSessionDate(timing.date)) throw new Error(`Invalid attendance date: ${timing.date}`);
+  if (typeof timing.startTime !== "string" || !isValidStartTime(timing.startTime)) throw new Error(`Invalid attendance start time: ${timing.startTime}`);
+  const students = await db.select<{ id: string }[]>("SELECT id FROM students WHERE course_id = $1", [courseId]);
+  const studentIds = new Set(students.map((student) => student.id));
+  for (const [studentId, hours] of Object.entries(absentHoursByStudent)) {
+    if (!studentIds.has(studentId)) throw new Error("Student does not belong to this course");
+    const invalid = hours.find((hour) => !Number.isInteger(hour) || hour < 1 || hour > timing.hours);
+    if (invalid !== undefined) throw new Error(`Absent hour out of range: ${invalid}`);
+  }
+  const marks = Object.fromEntries(students.map((student) => [student.id, Array.from({ length: timing.hours }, (_, index): AttendanceState => absentHoursByStudent[student.id]?.includes(index + 1) ? "absent" : "present")]));
+  const id = crypto.randomUUID();
+  await db.execute("INSERT INTO attendance_roll_calls (session_id, course_id, date, start_time, hours, marks) VALUES ($1, $2, $3, $4, $5, $6)", [id, courseId, timing.date, timing.startTime, timing.hours, JSON.stringify(marks)]);
+  const session = await fetchAttendanceSession(db, id);
+  if (!session) throw new Error("Attendance session was not saved");
+  return session;
+}
+
+// S5: newest class first.
+export async function listAttendanceSessions(courseId: string): Promise<AttendanceSession[]> {
+  const db = await getDatabase();
+  return db.select<AttendanceSession[]>(`SELECT ${ATTENDANCE_SESSION_COLUMNS} FROM attendance_sessions s WHERE s.course_id = $1 ORDER BY s.date DESC, s.start_time DESC, s.created_at DESC, s.rowid DESC`, [courseId]);
+}
+
+export async function listAttendanceMarks(sessionId: string): Promise<AttendanceMark[]> {
+  const db = await getDatabase();
+  return db.select<AttendanceMark[]>(`
+    SELECT m.student_id AS studentId, m.hour, m.state FROM attendance_marks m JOIN students st ON st.id = m.student_id
+    WHERE m.session_id = $1 ORDER BY st.sort_order, st.rowid, m.hour
+  `, [sessionId]);
+}
+
+// S6: per student, absent hours over the hours recorded for them; justified hours are reported apart and not counted.
+// Students without marks (added after every session) are not listed.
+export async function courseAttendanceTotals(courseId: string): Promise<AttendanceTotal[]> {
+  const db = await getDatabase();
+  return db.select<AttendanceTotal[]>(`
+    SELECT m.student_id AS studentId,
+      SUM(m.state = 'absent') AS absentHours, SUM(m.state = 'justified') AS justifiedHours, COUNT(*) AS recordedHours
+    FROM attendance_marks m JOIN attendance_sessions s ON s.id = m.session_id JOIN students st ON st.id = m.student_id
+    WHERE s.course_id = $1 GROUP BY m.student_id ORDER BY MIN(st.sort_order), MIN(st.rowid)
+  `, [courseId]);
+}
+
+// S3, S4, S5, S7: validates, then appends one history entry whose trigger applies the new states in the same statement.
+export async function correctAttendance(sessionId: string, studentId: string, correction: AttendanceCorrection): Promise<AttendanceState[]> {
+  const db = await getDatabase();
+  if (!(await fetchAttendanceSession(db, sessionId))) throw new Error("Attendance session not found");
+  const marks = await db.select<{ state: string }[]>("SELECT state FROM attendance_marks WHERE session_id = $1 AND student_id = $2 ORDER BY hour", [sessionId, studentId]);
+  if (!marks.length) throw new Error("Student has no attendance in this session");
+  const before = marks.map((mark) => mark.state);
+  if (!before.every(isAttendanceState)) throw new Error("Stored attendance has an unknown state");
+  const after = applyCorrection(before, correction);
+  const motive = correction.action === "excuse" ? correction.motive.trim() : null;
+  await db.execute(
+    "INSERT INTO attendance_history (id, session_id, student_id, action, motive, before_states, after_states) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    [crypto.randomUUID(), sessionId, studentId, correction.action, motive, JSON.stringify(before), JSON.stringify(after)]
+  );
+  return after;
+}
+
+// S5: newest correction first.
+export async function listAttendanceHistory(sessionId: string, studentId: string): Promise<AttendanceHistoryEntry[]> {
+  const db = await getDatabase();
+  const rows = await db.select<(Omit<AttendanceHistoryEntry, "beforeStates" | "afterStates"> & { beforeStates: string; afterStates: string })[]>(`
+    SELECT id, session_id AS sessionId, student_id AS studentId, changed_at AS changedAt, action, motive,
+      before_states AS beforeStates, after_states AS afterStates
+    FROM attendance_history WHERE session_id = $1 AND student_id = $2 ORDER BY rowid DESC
+  `, [sessionId, studentId]);
+  return rows.map((row) => ({ ...row, beforeStates: JSON.parse(row.beforeStates), afterStates: JSON.parse(row.afterStates) }));
 }
 
 // Read-only snapshot of the rows the Campus upload needs (SELECTs only; never creates defaults).
