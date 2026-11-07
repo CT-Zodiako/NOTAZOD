@@ -12,12 +12,14 @@ Branch `feature/attendance` (on top of `feature/home-agenda`). Built and tried i
 - S7: Data safety: new tables only (additive migration, idempotent); no existing table or row changes; deleting a course cascades its attendance (COURSE_CASCADE_KEYS updated so deleteCourse's cascade assertion covers them); a student added after a session has no marks for it (shown as "—", not counted); all writes validate input (hours 1-6, hour index in range, state in present/absent/justified, motive required for excuses) and reject without writing.
 
 ## Tasks
-- T1 (S2, S5, S7) Schema + db.ts API (create session with marks, list sessions, marks, totals, correct with history) with temp-SQLite tests including the migration of a database created by the previous code. Route: worker. Risk: item 1. Commit: pending
-- T2 (S1-S4) Pure attendance helpers (default hours from schedule, late-arrival states, totals) with tests. Route: worker. Commit: pending
-- T3 (S1, S3, S4, S6) UI: Tomar asistencia modal, Asistencia view, Corregir dialog with history. Route: worker. Commit: pending
+- T1 (S2, S5, S7) Schema + db.ts API (create session with marks, list sessions, marks, totals, correct with history) with temp-SQLite tests including the migration of a database created by the previous code. Route: worker. Risk: item 1. Commit: 11a8f5f
+- T2 (S1-S4) Pure attendance helpers (default hours from schedule, late-arrival states, totals) with tests. Route: worker. Commit: 91f0e9b
+- T3 (S1, S3, S4, S6) UI: Tomar asistencia modal, Asistencia view, Corregir dialog with history. Route: worker. Commit: 91f0e9b
 - T4 Independent verify (risk item 1), native review, build/install NOTAZOD Test, handoff. Route: verify + inline. Commit: n/a
 
 ## Log
 - L1: "vamos ahcer etonces lago en notazo que sea facil de utlizar la idea es poder llamra lsita facil sencillo , hay que tenrreglas por ejemplo ls flatas secuentn por horases decir 1 hora es una flaa si son 3 hroas y falta l a clase tiene 3 faltas yo debo poder corregirlas por si llega a la 2 hora  o la ahora uqe llego , y deberi poder borrar falta tambien tener encuenta de que si la borro por excusa o porque relamente si vino se debe guardar las fechas que se llama asitencia que se vea como una integracion"
 - L2: User chose "Lista rápida manual" (camera kiosk and local network deferred). Assumed and stated: absences do not change grades automatically.
 - L3: Design `design/asistencia/` (01-pestana-sesiones, 02-columna-en-notas, 03-matriz-fechas); user handed off 01.
+- L4: Evidence: worker RED (attendance.ts ERR_MODULE_NOT_FOUND; attendanceDb 0/34) then GREEN 18/18 and 34/34; suite 166/166; tsc clean; build ok. Writes are atomic via one INSERT per roll call/correction with validating triggers (JSON functions; bundled SQLite 3.46.0). Independent verify: S1-S7 pass, no blockers; migration probed from a database built by the 44c63e6 code (all rows/schema identical, idempotent, cascade complete, old code still opens it). Verifier probe tests added (42/42). NOTAZOD Test installed; its notazod-test.db now has the 3 tables, the view and 3 triggers. Advisories kept: raw SQL can insert partial roll calls; history rows deletable (needed for cascade); "Llegó tarde" over justified hours re-marks them (excuse remains in history).
+
