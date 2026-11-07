@@ -650,3 +650,19 @@ for (const [label, studentId, states, message] of [
     assert.deepEqual(storedRows(dbName, ALL_TABLES), before);
   });
 }
+
+test("a history row left without its student makes the migration fail and changes nothing (S8, advisory)", async () => {
+  const dbName = "migrate-dangling.db";
+  createPreviousAttendanceDatabase(dbName);
+  withConnection(dbName, (c) => c.exec("PRAGMA foreign_keys = OFF; DELETE FROM students WHERE id = 's4';"));
+  const before = storedRows(dbName, ALL_TABLES.filter((t) => t !== "students"));
+  const error = await rejectionOf(openDb(dbName));
+  assert.match(error?.message ?? "", /FOREIGN KEY/);
+  assert.deepEqual(storedRows(dbName, ALL_TABLES.filter((t) => t !== "students")), before);
+});
+
+test("an edit can turn a justified hour present or absent but cannot justify one (S8)", async () => {
+  const db = await openDb((createPreviousAttendanceDatabase("edit-j.db"), "edit-j.db"));
+  assert.deepEqual(await db.correctAttendance("a2", "s4", { action: "edit", states: ["absent", "present"] }), ["absent", "present"]);
+  assert.equal((await rejectionOf(db.correctAttendance("a2", "s4", { action: "edit", states: ["justified", "present"] })))?.message, "Invalid attendance state for hour 1: justified");
+});
