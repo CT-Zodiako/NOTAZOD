@@ -38,7 +38,7 @@ The result shows, per course, `Corte N: subidas/total` and the students that are
 
 ## How it works
 
-- `app/src-tauri/src/lib.rs`: `campus_open` creates the `campus` window (navigation locked to `campus2.unimayor.edu.co`, no capability, so the page cannot call the app). `campus_eval` runs a synchronous script in that window and returns its JSON result, only while it shows the Campus host.
+- `app/src-tauri/src/lib.rs`: `campus_open` creates the `campus` window (navigation locked to `campus2.unimayor.edu.co`, no capability, so the page cannot call the app). Opening it (or bringing it back) splits the screen NOTAZOD is on: NOTAZOD fills the left half and the Campus the right half. `campus_eval` runs a synchronous script in that window and returns its JSON result, only while it shows the Campus host.
 - `app/src-tauri/src/campus_init.js`: injected into every Campus page; answers dialogs only while an upload runs.
 - `app/src/lib/campus.ts`: the upload, check and sync readers. `app/src/lib/campusGrades.ts` and `app/src/lib/campusSync.ts`: pure grade, verification and sync planning logic.
 

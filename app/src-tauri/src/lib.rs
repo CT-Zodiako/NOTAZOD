@@ -274,11 +274,12 @@ async fn campus_open(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(CAMPUS_WINDOW) {
         let _ = window.unminimize();
         window.show().map_err(|error| error.to_string())?;
+        tile_with_campus(&app, &window);
         window.set_focus().map_err(|error| error.to_string())?;
         return Ok(());
     }
     let url = CAMPUS_START_URL.parse::<tauri::Url>().map_err(|error| error.to_string())?;
-    tauri::WebviewWindowBuilder::new(&app, CAMPUS_WINDOW, tauri::WebviewUrl::External(url))
+    let window = tauri::WebviewWindowBuilder::new(&app, CAMPUS_WINDOW, tauri::WebviewUrl::External(url))
         .title("Campus Unimayor - NOTAZOD")
         .inner_size(1100.0, 800.0)
         .initialization_script(CAMPUS_INIT_SCRIPT)
@@ -286,7 +287,37 @@ async fn campus_open(app: tauri::AppHandle) -> Result<(), String> {
         .on_navigation(|url| is_campus_url(url) || url.scheme() == "about")
         .build()
         .map_err(|error| error.to_string())?;
+    tile_with_campus(&app, &window);
+    let _ = window.set_focus();
     Ok(())
+}
+
+// Left and right halves (x, y, width, height) of a work area; an odd pixel goes to the right half.
+fn split_halves(x: i32, y: i32, width: u32, height: u32) -> ((i32, i32, u32, u32), (i32, i32, u32, u32)) {
+    let left = width / 2;
+    ((x, y, left, height), (x + left as i32, y, width - left, height))
+}
+
+// Fills the screen NOTAZOD is on: NOTAZOD on the left half, the Campus on the right half, so the
+// Campus window never opens hidden behind the app. Best effort: a failure leaves the windows as they are.
+fn tile_with_campus(app: &tauri::AppHandle, campus: &tauri::WebviewWindow) {
+    use tauri::{Manager, PhysicalPosition, PhysicalSize};
+
+    let Some(main) = app.get_webview_window("main") else { return };
+    let Ok(Some(monitor)) = main.current_monitor() else { return };
+    let area = monitor.work_area();
+    let (left, right) = split_halves(area.position.x, area.position.y, area.size.width, area.size.height);
+    for (window, (x, y, width, height)) in [(&main, left), (campus, right)] {
+        let _ = window.set_fullscreen(false);
+        let _ = window.unmaximize();
+        let _ = window.unminimize();
+        // set_size sets the inner size; subtract the title bar and borders so the outer frame fits.
+        let (Ok(outer), Ok(inner)) = (window.outer_size(), window.inner_size()) else { continue };
+        let frame_w = outer.width.saturating_sub(inner.width);
+        let frame_h = outer.height.saturating_sub(inner.height);
+        let _ = window.set_position(PhysicalPosition::new(x, y));
+        let _ = window.set_size(PhysicalSize::new(width.saturating_sub(frame_w), height.saturating_sub(frame_h)));
+    }
 }
 
 // Evaluates a synchronous script in the Campus window and returns its JSON-serialized result.
@@ -339,4 +370,19 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod split_tests {
+    use super::split_halves;
+
+    #[test]
+    fn splits_the_work_area_into_left_and_right_halves() {
+        assert_eq!(split_halves(0, 25, 1440, 875), ((0, 25, 720, 875), (720, 25, 720, 875)));
+    }
+
+    #[test]
+    fn an_odd_width_gives_the_extra_pixel_to_the_right_half() {
+        assert_eq!(split_halves(-1920, 0, 1921, 1080), ((-1920, 0, 960, 1080), (-960, 0, 961, 1080)));
+    }
 }
