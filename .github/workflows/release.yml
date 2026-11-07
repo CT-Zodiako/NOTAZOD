@@ -25,7 +25,7 @@ jobs:
       matrix:
         include:
           - platform: macOS Apple Silicon
-            runner: macos-14
+            runner: macos-15
             # The `app` bundle is required for the macOS updater artifact.
             bundles: app,dmg
           - platform: Windows
