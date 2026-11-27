@@ -10,10 +10,15 @@ Branch `feature/campus-module-info` (from `main` at 502e3f7). Built and tried in
 - S5: Each course card on the home screen (user chose: "Faltas pierde (horas)", "Habilitable (recuperable sí/no)", "Créditos") shows e.g. "Pierde con 7 h de falta · Habilitable: No · 2 créditos". Courses without synced module info show nothing extra. Works at ~820px wide, dark and light themes, colors only from tokens.
 
 ## Tasks
-- T1 (S1-S3) Read dates and components in the grading form during sync, pure parsing helpers with tests, store them (additive schema). Route: worker. Commit: pending
-- T2 (S4, S5) Home dates strip and course card module info. Route: worker. Commit: pending
+- T1 (S1-S3) Read dates and components in the grading form during sync, pure parsing helpers with tests, store them (additive schema). Route: worker. Commit: 7df7aca, de88581, 38b41c3
+- T2 (S4, S5) Home dates strip and course card module info. Route: worker. Commit: 11a41fb, 38b41c3
 - T3 Try in NOTAZOD Test with a real sync, update docs. Route: inline + user. Commit: pending
 
 ## Log
 - L1: "quiero que las fehcas de ciere y de apertura este e ngenral en la pantalla pirniapl y y la infmroamco de horas de modulo de perdida por falta recuerpable o no apasres en latarejta de cada materie [Image#1] para cuando se sinornice lo haga" (screenshot of the Campus boxes and components table quoted in S2).
 - L2: Decisions (user): source page is the "Calificar" grading form; card shows Faltas pierde, Habilitable and Créditos (not % per corte).
+- L3: Evidence T1 (7df7aca): worker RED (module not found + listCampusModuleInfo missing) then GREEN; new table campus_group_module_info (course_id, campus_key, period_dates JSON, module_components JSON, PK course_id+campus_key, ON DELETE CASCADE) instead of ALTER columns because attendanceDb tests pin the old tables; attendanceDb S8 schema assertion now expects exactly the old objects plus the new table and its index. Suite 215/215, tsc clean (parent re-ran).
+- L4: Evidence T2 (11a41fb): strip between "Próxima clase" and the week; corte states Abierto/Cerrado/Próximo with inclusive date boundaries; general dates = most common set among current-semester groups (tie: first). Suite 226/226, tsc and build:staging ok (parent re-ran tests and tsc).
+- L5: Independent verifier (Risk: item 1): S1-S5 pass at logic level; upgrade over a baseline-filled DB keeps every row and schema object byte-identical; backup/restore and course delete handle the new table. Unverified: live Campus page, 820px/dark-light look. Advisory comments and suggested tests applied in de88581 (229/229).
+- L6: Native review (base 502e3f7, committed-only, lenses risk + reliability, escalated item 1): approved and acknowledged, lineage review-7c10c406cd36d7ae, authority burned. Non-blocking findings R3-001 (null page read wiped stored info), R3-002 (card mixed values of different components), R3-003 (page/stored boundary untested), R3-004 (first empty matching table hid a later one) fixed in 38b41c3 with tests (233/233, tsc clean); assess of 38b41c3: medium, review not due.
+- L7: Slice boundary: 7df7aca (T1, ~436 lines) | 11a41fb + de88581 + 38b41c3 (T2 and fixes).
