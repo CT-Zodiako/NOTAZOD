@@ -22,7 +22,7 @@ NOTAZOD helps teachers manage courses, students, activities, periods, and grades
 - Close and reopen periods manually.
 - Calculate period grades, weighted accumulated grade, and final grade.
 - Search students by name, code, or institutional email.
-- Export selected table columns as PNG or download CSV/Excel-compatible templates.
+- Export selected table columns as PNG or download CSV/Excel-compatible templates. Exports are saved to your Downloads folder (never overwriting: a repeated export becomes `name (1).ext`), and a notification confirms the saved file name or shows why it failed.
 - Keep all data locally in SQLite.
 
 ## Calculation model
@@ -91,7 +91,7 @@ The main workflow is intentionally compact:
 3. Search or filter students.
 4. Enter grades from the main action menu or click a grade cell.
 5. Close a period when grades are complete.
-6. Export only the information needed.
+6. Export only the information needed; a notification confirms the file saved in Downloads.
 
 ![Grading workflow](docs/assets/notazod-workflow.svg)
 

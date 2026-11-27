@@ -213,3 +213,8 @@ button.attendance-hour:focus-visible, .roll-name:focus-visible, .attendance-sess
 .roll-progress span[data-tone="failing"] { background: var(--color-grade-failing); border-color: var(--color-grade-failing); }
 .roll-progress span[data-current] { outline: var(--borderWidth-focus) solid var(--color-border-focus); outline-offset: 1px; }
 
+/* Export confirmation: fixed above any open modal, readable in light and dark. */
+.export-notice { position: fixed; right: var(--space-4); bottom: var(--space-4); z-index: var(--mantine-z-index-max); width: min(420px, calc(100vw - 2 * var(--space-4))); }
+.export-notice .mantine-Notification-root { background: var(--color-surface-raised); border-color: var(--color-border-subtle); box-shadow: var(--shadow-overlay); }
+.export-notice .mantine-Notification-title { color: var(--color-text-default); }
+.export-notice .mantine-Notification-description { color: var(--color-text-default); overflow-wrap: anywhere; }

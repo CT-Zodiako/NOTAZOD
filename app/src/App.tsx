@@ -14,8 +14,10 @@ import {
   Group,
   Menu,
   Modal,
+  Notification,
   NumberInput,
   Popover,
+  Portal,
   Progress,
   SegmentedControl,
   Select,
@@ -35,6 +37,7 @@ import { currentSemester, planCourseSync, SyncAction } from "./lib/campusSync";
 import { courseModuleSummary, homePeriodStrip, localIsoDate, PeriodState } from "./lib/moduleInfo";
 import { hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
 import { campusStateFor, COURSE_COLOR_SWATCHES, courseColorStyle, countByFilter, hasPendingGrade, heatTint, isAtRisk, matchesFilter, STUDENT_FILTER, StudentFilter, StudentStatus } from "./lib/studentList";
+import { ExportKind, exportFailedMessage, exportSavedMessage, gradeTemplateFile, periodImageFileName, saveToDownloads, singleFlight } from "./lib/exportFile";
 import { buildWeek, dayLabel, formatTime, nextClass, nextClassLabel, weekdayName } from "./lib/schedule";
 import { absenceLabel, AttendanceState, hourRangeLabel, lateArrivalStates, toggleCorrectionHour, courseTotalLabel, defaultSessionTiming, describeHistoryEntry, formatSessionDate, isValidSessionHours, MAX_SESSION_HOURS, MIN_SESSION_HOURS, resizeStates, rollCallDefaults, rollCallSummary, sessionLabel, stateCounts, toggleHour, toggleStudent } from "./lib/attendance";
 
@@ -131,6 +134,11 @@ function App() {
   const [activityName, setActivityName] = useState("");
   const [exportModal, setExportModal] = useState(false);
   const [exportError, setExportError] = useState("");
+  // Confirms where an export was saved (or why it failed); shown above any open modal.
+  const [exportNotice, setExportNotice] = useState<{ id: number; type: "success" | "error"; text: string } | null>(null);
+  const [exportSaving, setExportSaving] = useState(false);
+  // One export at a time, from the first click until the file is saved (generation included).
+  const [runExport] = useState(() => singleFlight(setExportSaving));
   const [templateModal, setTemplateModal] = useState(false);
   const [templateColumns, setTemplateColumns] = useState<string[]>(["code", "name", "email"]);
   const [exportColumns, setExportColumns] = useState<string[]>(["code", "periodGrade"]);
@@ -221,6 +229,25 @@ function App() {
   }, []);
 
   useEffect(() => () => stopRoulette(), []);
+
+  useEffect(() => {
+    if (!exportNotice) return;
+    const timer = setTimeout(() => setExportNotice((current) => current?.id === exportNotice.id ? null : current), exportNotice.type === "success" ? 5000 : 8000);
+    return () => clearTimeout(timer);
+  }, [exportNotice]);
+
+  // Saves an export to Downloads and confirms it with a notification; true when it was saved.
+  async function saveExport(kind: ExportKind, fileName: string, bytes: Uint8Array) {
+    try {
+      const savedPath = await saveToDownloads(fileName, bytes);
+      setExportNotice({ id: Date.now(), type: "success", text: exportSavedMessage(kind, savedPath) });
+      return true;
+    } catch (error) {
+      console.error("No se pudo guardar la exportación", error);
+      setExportNotice({ id: Date.now(), type: "error", text: exportFailedMessage(error) });
+      return false;
+    }
+  }
 
   // A failed read keeps what is shown; the home screen works the same without module info.
   async function reloadModuleInfo() {
@@ -634,6 +661,10 @@ function App() {
   }
 
   function exportPeriodImage() {
+    return runExport(savePeriodImage);
+  }
+
+  async function savePeriodImage() {
     if (!activePeriod || !students.length || !exportColumns.length) return;
     setExportError("");
     // Only columns available in the active period, in the same order as the column picker.
@@ -671,15 +702,17 @@ function App() {
       row.forEach((value, columnIndex) => { context.fillStyle = "#18212f"; context.fillText(fit(value, widths[columnIndex]), offsets[columnIndex], y); });
       if (rowIndex < students.length - 1) { context.strokeStyle = "#eef1f5"; context.beginPath(); context.moveTo(16, y + 14); context.lineTo(canvas.width - 16, y + 14); context.stroke(); }
     });
+    let bytes: Uint8Array;
     try {
-      const link = document.createElement("a");
-      link.download = `notazod-corte-${activePeriod.number}.png`;
-      link.href = canvas.toDataURL("image/png");
-      link.click();
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!blob) throw new Error("El lienzo no generó la imagen");
+      bytes = new Uint8Array(await blob.arrayBuffer());
     } catch (cause) {
       console.error("No se pudo generar la imagen de exportación", cause);
       setExportError("No se pudo generar la imagen con esas columnas. Probá reducir la cantidad de campos.");
+      return;
     }
+    await saveExport("image", periodImageFileName(activePeriod.number), bytes);
   }
 
   function openRenameActivity(item: GradeItem) {
@@ -960,6 +993,10 @@ function App() {
   }
 
   function downloadGradeTemplate(format: "csv" | "xls") {
+    return runExport(() => saveGradeTemplate(format));
+  }
+
+  async function saveGradeTemplate(format: "csv" | "xls") {
     if (!activePeriod || !students.length) return;
     const labels: Record<string, string> = { code: "Código", name: "Nombre", email: "Correo institucional", document: "Documento", personalEmail: "Correo personal" };
     const headers = templateColumns.map((key) => String(labels[key] ?? gradeItems.find((item) => item.id === key)?.name ?? key));
@@ -972,15 +1009,8 @@ function App() {
       const value = key === "code" ? studentItem.code : key === "name" ? studentItem.fullName : key === "email" ? studentItem.institutionalEmail : key === "document" ? studentItem.documentId : key === "personalEmail" ? studentItem.personalEmail : "";
       return String(value ?? "");
     }))];
-    const csv = lines.map((line) => line.map((value) => `"${value.replace(/"/g, '""')}"`).join(";")).join("\n");
-    const html = `<html><head><meta charset="utf-8"></head><body><table>${lines.map((line) => `<tr>${line.map((value) => `<td>${value.replace(/"/g, "")}</td>`).join("")}</tr>`).join("")}</table></body></html>`;
-    const link = document.createElement("a");
-    link.download = `plantilla-notas-corte-${activePeriod.number}.${format}`;
-    const objectUrl = URL.createObjectURL(new Blob([format === "csv" ? csv : html], { type: format === "csv" ? "text/csv;charset=utf-8" : "application/vnd.ms-excel" }));
-    link.href = objectUrl;
-    link.click();
-    URL.revokeObjectURL(objectUrl);
-    setTemplateModal(false);
+    const file = gradeTemplateFile(lines, format, activePeriod.number);
+    if (await saveExport("grades", file.fileName, file.bytes)) setTemplateModal(false);
   }
 
   async function checkForUpdates(showModal = true) {
@@ -1448,8 +1478,8 @@ function App() {
       <Modal opened={deleteCourseModal} onClose={() => { setDeleteCourseModal(false); setDeleteConfirmation(""); setDeleteCourseError(""); }} title="Eliminar curso" centered><Stack><Text c="red">Esta acción elimina permanentemente estudiantes, actividades y notas.</Text><Text size="sm">Escribí exactamente <b>{selectedCourse?.name}</b> para confirmar.</Text><TextInput label="Confirmación" value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.currentTarget.value)} autoFocus />{deleteCourseError ? <Text c="red" size="sm" role="alert">{deleteCourseError}</Text> : null}<Group justify="flex-end"><Button variant="default" onClick={() => setDeleteCourseModal(false)}>Cancelar</Button><Button color="red" onClick={() => void handleDeleteCourse()} disabled={deleteConfirmation.trim() !== selectedCourse?.name}>Eliminar definitivamente</Button></Group></Stack></Modal>
       <Modal opened={courseModal} onClose={() => setCourseModal(false)} title="Crear curso" centered><Stack><TextInput label="Nombre del curso" placeholder="Ej. Cálculo I" value={name} onChange={(event) => setName(event.currentTarget.value)} required /><TextInput label="Semestre" value={semester} onChange={(event) => setSemester(event.currentTarget.value)} required /><Text size="sm" c="dimmed">Se crearán tres cortes abiertos. Podés cerrar o reabrir cada corte manualmente cuando quieras.</Text><Group justify="flex-end"><Button variant="default" onClick={() => setCourseModal(false)}>Cancelar</Button><Button onClick={handleCreateCourse} disabled={!name.trim()}>Crear curso</Button></Group></Stack></Modal>
       <Modal opened={studentModal} onClose={() => setStudentModal(false)} title="Agregar estudiante" centered><Stack>{field("fullName", "Nombre completo")}{field("code", "Código")}{field("documentId", "Documento")}{field("institutionalEmail", "Correo institucional", "email")}{field("personalEmail", "Correo personal", "email")}<Group justify="flex-end"><Button variant="default" onClick={() => setStudentModal(false)}>Cancelar</Button><Button onClick={handleCreateStudent} disabled={Object.values(student).some((value) => !value.trim())}>Agregar</Button></Group></Stack></Modal>
-      <Modal opened={templateModal} onClose={() => setTemplateModal(false)} title="Qué querés exportar" centered><Stack><Text size="sm" c="dimmed">Elegí las columnas de la plantilla y después el formato.</Text>{templateFieldOptions().map((column) => <Checkbox key={column.key} label={column.label} checked={templateColumns.includes(column.key)} onChange={(event) => toggleTemplateColumn(column.key, event.currentTarget.checked)} />)}<Text size="sm" c="dimmed">Formato</Text><Group><Button disabled={!templateColumns.length} onClick={() => downloadGradeTemplate("csv")}>CSV</Button><Button variant="light" disabled={!templateColumns.length} onClick={() => downloadGradeTemplate("xls")}>Excel (.xls)</Button></Group></Stack></Modal>
-      <Modal opened={exportModal} onClose={() => setExportModal(false)} title={`Elegir columnas · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">Elegí qué información querés incluir en la imagen.</Text>{exportColumnOptions.map((column) => <Checkbox key={column.key} label={column.label} checked={exportColumns.includes(column.key)} onChange={(event) => { const checked = event.currentTarget.checked; setExportColumns((current) => { const safeCurrent = Array.isArray(current) ? current.filter((value): value is string => typeof value === "string") : []; return checked ? safeCurrent.includes(column.key) ? safeCurrent : [...safeCurrent, column.key] : safeCurrent.filter((key) => key !== column.key); }); }} />)}{exportError ? <Text size="sm" c="red">{exportError}</Text> : null}<Group justify="flex-end"><Button variant="default" onClick={() => setExportModal(false)}>Cancelar</Button><Button disabled={!hasExportSelection} onClick={exportPeriodImage}>Descargar imagen</Button></Group></Stack></Modal>
+      <Modal opened={templateModal} onClose={() => setTemplateModal(false)} title="Qué querés exportar" centered><Stack><Text size="sm" c="dimmed">Elegí las columnas de la plantilla y después el formato.</Text>{templateFieldOptions().map((column) => <Checkbox key={column.key} label={column.label} checked={templateColumns.includes(column.key)} onChange={(event) => toggleTemplateColumn(column.key, event.currentTarget.checked)} />)}<Text size="sm" c="dimmed">Formato</Text><Group><Button disabled={!templateColumns.length || exportSaving} onClick={() => void downloadGradeTemplate("csv")}>CSV</Button><Button variant="light" disabled={!templateColumns.length || exportSaving} onClick={() => void downloadGradeTemplate("xls")}>Excel (.xls)</Button></Group></Stack></Modal>
+      <Modal opened={exportModal} onClose={() => setExportModal(false)} title={`Elegir columnas · Corte ${activePeriod?.number ?? ""}`} centered><Stack><Text size="sm" c="dimmed">Elegí qué información querés incluir en la imagen.</Text>{exportColumnOptions.map((column) => <Checkbox key={column.key} label={column.label} checked={exportColumns.includes(column.key)} onChange={(event) => { const checked = event.currentTarget.checked; setExportColumns((current) => { const safeCurrent = Array.isArray(current) ? current.filter((value): value is string => typeof value === "string") : []; return checked ? safeCurrent.includes(column.key) ? safeCurrent : [...safeCurrent, column.key] : safeCurrent.filter((key) => key !== column.key); }); }} />)}{exportError ? <Text size="sm" c="red">{exportError}</Text> : null}<Group justify="flex-end"><Button variant="default" onClick={() => setExportModal(false)}>Cancelar</Button><Button disabled={!hasExportSelection} loading={exportSaving} onClick={() => void exportPeriodImage()}>Descargar imagen</Button></Group></Stack></Modal>
       <Modal opened={checkModal} onClose={() => { if (checkState !== "checking") setCheckModal(false); }} title="Verificar notas en el Campus" centered size="xl">
         <Stack>
           {checkState === "idle" ? <><Text size="sm">NOTAZOD va a leer cada grupo del Campus y comparar, estudiante por estudiante, la nota de cada corte con la "Nota del corte" de NOTAZOD. Solo se revisan los cortes que tienen notas en NOTAZOD. No se escribe ni se guarda nada en el Campus.</Text><Text size="sm" c="dimmed">Si el Campus te pide iniciar sesión, hacelo en su ventana.</Text><Group justify="flex-end"><Button variant="default" onClick={() => setCheckModal(false)}>Cancelar</Button><Button color="teal" onClick={() => void runCheck()}>Verificar</Button></Group></> : null}
@@ -1640,6 +1670,15 @@ function App() {
           <Group justify="flex-end"><Button variant="default" onClick={() => setGradeHistoryModal(false)}>Cerrar</Button></Group>
         </Stack>
       </Modal>
+      {exportNotice ? (
+        <Portal>
+          <div className="export-notice" role={exportNotice.type === "success" ? "status" : "alert"} aria-live={exportNotice.type === "success" ? "polite" : "assertive"}>
+            <Notification key={exportNotice.id} color={exportNotice.type === "success" ? "green" : "red"} title={exportNotice.type === "success" ? "Exportación guardada" : "Exportación fallida"} withBorder closeButtonProps={{ "aria-label": "Cerrar notificación" }} onClose={() => setExportNotice(null)}>
+              {exportNotice.text}
+            </Notification>
+          </div>
+        </Portal>
+      ) : null}
     </AppShell>
   );
 }
