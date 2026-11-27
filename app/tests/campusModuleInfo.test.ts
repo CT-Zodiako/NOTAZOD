@@ -54,6 +54,18 @@ test("S2: headers match without accents, extra rows above the header and several
   ]);
 });
 
+test("S2: columns are found by header in any order, upper case and without accents, after a caption row", () => {
+  const order = [5, 7, 1, 4, 0, 3, 6, 2];
+  const header = ["COMP. MODULO", "HABILITABLE", "CRED.", "FALTAS PIERDE", "% CORTE 1", "% CORTE 2", "% CORTE 3", "PLAN EST."];
+  const table = [["COMPONENTES DE MODULO ASOCIADOS A ESTE GRUPO."], order.map((i) => header[i]), order.map((i) => ROW[i])];
+  assert.deepEqual(parseModuleComponents([table]), [COMPONENT]);
+});
+
+test("S2: an impossible date or a year with extra digits is not read as a date", () => {
+  assert.deepEqual(parsePeriodDates("Apertura Corte 1: 31/02/2026 Cierre Corte 1: 27/09/2026"), [{ period: 1, opens: null, closes: "2026-09-27" }]);
+  assert.deepEqual(parsePeriodDates("Apertura Corte 1: 12/09/20261"), []);
+});
+
 test("S2: a missing table or garbled cells leave the values empty", () => {
   assert.deepEqual(parseModuleComponents([]), []);
   assert.deepEqual(parseModuleComponents([[["Código", "Alumno", "Nota 1"], ["1", "Ana", "4,0"]]]), []);

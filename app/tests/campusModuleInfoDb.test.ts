@@ -103,7 +103,7 @@ test("S3: the new module info table leaves existing courses and groups as they a
   const [course] = await db.listCourses();
   assert.equal(course.students, 1);
   assert.deepEqual(course.campusGroups.map(({ courseId, ...g }) => g), [groupMeta()]);
-  // A second start runs the ALTERs again without failing or touching the rows.
+  // A second start runs CREATE TABLE IF NOT EXISTS again without failing or touching the rows.
   const again = await openDb("migrate.db");
   assert.equal((await again.listCourses()).length, 1);
 });
@@ -138,4 +138,20 @@ test("S3: a created course stores its group's module info", async () => {
   await db.deleteCourse(course.id);
   assert.deepEqual(await db.listCampusModuleInfo(), []);
   assert.equal(withConnection("create.db", (c) => c.prepare("SELECT COUNT(*) AS n FROM campus_group_module_info").get().n), 0);
+});
+
+test("S3: a backup carries the module info and deleting another course keeps it", async () => {
+  createPreviousDatabase("backup.db");
+  const db = await openDb("backup.db");
+  await db.applyCourseSync([addAction([groupMeta({ moduleInfo: INFO })])]);
+  const other = await db.createCourse("Otro curso", "2026-2");
+  await db.applyCourseSync([{ kind: "add", campusGroups: [groupMeta({ key: "k2", group: "Grupo C", moduleInfo: { periods: [], components: [] } })], groupKeys: ["k2"], courseId: other.id, courseName: "Otro curso", toAdd: [], skipped: [], notInCampus: [], periodImports: [], periodSkips: [] }]);
+  const stored = [{ courseId: "c1", key: "k1", group: "Grupo B", periods: DATES, components: [COMPONENT] }];
+
+  await db.exportBackup(join(tempDir, "backup-export.db"));
+  const restored = await openDb("backup-export.db");
+  assert.deepEqual(await restored.listCampusModuleInfo(), [...stored, { courseId: other.id, key: "k2", group: "Grupo C", periods: [], components: [] }]);
+
+  await db.deleteCourse(other.id);
+  assert.deepEqual(await db.listCampusModuleInfo(), stored);
 });

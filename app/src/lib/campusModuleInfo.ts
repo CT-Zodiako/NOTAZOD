@@ -81,7 +81,7 @@ export function parseModuleInfo(raw: { text?: unknown; tables?: unknown } | null
   return { periods: parsePeriodDates(raw?.text ?? ""), components: parseModuleComponents(raw?.tables) };
 }
 
-// ---- Storage: JSON columns of campus_course_groups (period_dates, module_components) ----
+// ---- Storage: JSON columns period_dates and module_components of the campus_group_module_info table ----
 
 export function encodeModuleInfo(info: CampusModuleInfo) {
   return { periodDates: JSON.stringify(info.periods), moduleComponents: JSON.stringify(info.components) };
