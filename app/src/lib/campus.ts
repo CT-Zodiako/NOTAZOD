@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { buildCampusData, checkUploaded, formatGrade, matchGroup, planUpload, scopeToCourse, verifyGroup, type UploadCheck, type Verification } from "./campusGrades";
 import type { CampusCourseGroup } from "./campusSync";
-import { parseModuleInfo, type CampusFormInfoRaw, type CampusModuleInfo } from "./campusModuleInfo";
+import { moduleInfoFromPage, type CampusFormInfoRaw, type CampusModuleInfo } from "./campusModuleInfo";
 import { loadCampusRows } from "./db";
 import type { StudentDraft } from "./validation";
 
@@ -315,9 +315,10 @@ export async function readCampusCourses(onStatus: (message: string) => void): Pr
       period: i + 1,
       values: Object.fromEntries(form.rows.filter((row) => row.inputs[i]).map((row) => [row.code, row.inputs[i]!.value])),
     })) : [];
-    // S2: corte dates and module components; a page that cannot be read leaves them out and the sync goes on.
+    // S2: corte dates and module components; a page that cannot be read (error or null) leaves them out,
+    // so the stored values are kept, and the sync goes on.
     let moduleInfo: CampusModuleInfo | undefined;
-    try { moduleInfo = parseModuleInfo(await evalInCampus<CampusFormInfoRaw | null>(READ_MODULE_INFO)); } catch { moduleInfo = undefined; }
+    try { moduleInfo = moduleInfoFromPage(await evalInCampus<CampusFormInfoRaw | null>(READ_MODULE_INFO)); } catch { moduleInfo = undefined; }
     periodsByGroup.set(`${group.group} | ${group.module}`, { openColumn: form.openColumn, pastGrades, moduleInfo });
   }
 

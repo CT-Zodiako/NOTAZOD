@@ -46,6 +46,7 @@ const number = (text: string) => (/^\d+(?:[.,]\d+)?$/.test(text) ? Number(text.r
 const yesNo = (text: string) => (norm(text) === "si" ? true : norm(text) === "no" ? false : null);
 
 // The header row is the one with a "Comp..." and a "Habilitable" cell; every column is found by its header text.
+// The first matching table with data rows wins; an empty matching table does not hide a later one.
 export function parseModuleComponents(tables: unknown): CampusModuleComponent[] {
   if (!Array.isArray(tables)) return [];
   for (const table of tables) {
@@ -60,7 +61,7 @@ export function parseModuleComponents(tables: unknown): CampusModuleComponent[] 
       .map((h, index) => ({ index, period: Number(/^%\s*corte\s*(\d+)/.exec(h)?.[1]) }))
       .filter((column) => column.period > 0)
       .sort((a, b) => a.period - b.period);
-    return rows.slice(headerIndex + 1).flatMap((row) => {
+    const components = rows.slice(headerIndex + 1).flatMap((row) => {
       const cell = (index: number) => (index >= 0 ? row[index] ?? "" : "");
       const module = cell(columns.module);
       if (!module) return [];
@@ -73,12 +74,23 @@ export function parseModuleComponents(tables: unknown): CampusModuleComponent[] 
         plan: cell(columns.plan),
       }];
     });
+    if (components.length) return components;
   }
   return [];
 }
 
 export function parseModuleInfo(raw: { text?: unknown; tables?: unknown } | null | undefined): CampusModuleInfo {
   return { periods: parsePeriodDates(raw?.text ?? ""), components: parseModuleComponents(raw?.tables) };
+}
+
+// What a sync stores for one grading form (S2, S3). A page that could not be read (null or not the
+// { text, tables } shape) gives undefined, so the stored values are kept; a page that was read but
+// shows no boxes or table gives empty values, which replace the stored ones.
+export function moduleInfoFromPage(raw: unknown): CampusModuleInfo | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const { text, tables } = raw as { text?: unknown; tables?: unknown };
+  if (typeof text !== "string" || !Array.isArray(tables)) return undefined;
+  return parseModuleInfo({ text, tables });
 }
 
 // ---- Storage: JSON columns period_dates and module_components of the campus_group_module_info table ----

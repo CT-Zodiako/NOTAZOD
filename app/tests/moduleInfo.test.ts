@@ -93,10 +93,20 @@ test("S5: missing values are left out and a course without synced module info sh
   assert.equal(courseModuleSummary([group("b", DATES, [component()])], "a"), "");
 });
 
-test("S5: with several components or groups each value comes from the first one that has it", () => {
+test("S5: with several components or groups the line describes only the first component that has any value", () => {
   const groups = [
     group("a", DATES, [component({ absenceLimit: null, credits: 3 }), component({ absenceLimit: 9, credits: 4, habilitable: true })], "a-1"),
     group("a", DATES, [component({ absenceLimit: 5 })], "a-2"),
   ];
-  assert.equal(courseModuleSummary(groups, "a"), "Pierde con 9 h de falta · Habilitable: No · 3 créditos");
+  // First component of a-1: no Faltas pierde, Habilitable NO, 3 créditos.
+  assert.equal(courseModuleSummary(groups, "a"), "Habilitable: No · 3 créditos");
+});
+
+test("S5: values of a later component are never mixed into the first one's line", () => {
+  const empty = component({ habilitable: null, credits: null, absenceLimit: null });
+  const partial = component({ habilitable: null, credits: null, absenceLimit: 6 });
+  const other = component({ habilitable: true, credits: 4, absenceLimit: 9 });
+  assert.equal(courseModuleSummary([group("a", DATES, [partial, other])], "a"), "Pierde con 6 h de falta");
+  // A component with none of the three values is skipped; the next one with any value is described alone.
+  assert.equal(courseModuleSummary([group("a", DATES, [empty], "a-1"), group("a", DATES, [partial, other], "a-2")], "a"), "Pierde con 6 h de falta");
 });

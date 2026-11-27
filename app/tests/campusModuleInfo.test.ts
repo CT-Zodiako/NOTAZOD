@@ -2,7 +2,7 @@
 // Pure parsing only; the page script just hands over the body text and the table cells.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decodeModuleInfo, encodeModuleInfo, parseModuleComponents, parseModuleInfo, parsePeriodDates } from "../src/lib/campusModuleInfo.ts";
+import { decodeModuleInfo, encodeModuleInfo, moduleInfoFromPage, parseModuleComponents, parseModuleInfo, parsePeriodDates } from "../src/lib/campusModuleInfo.ts";
 import { planCourseSync } from "../src/lib/campusSync.ts";
 
 // The three boxes exactly as the Campus shows them (S2), one per line and also glued together by textContent.
@@ -75,6 +75,26 @@ test("S2: a missing table or garbled cells leave the values empty", () => {
     { module: "MODULO Y", habilitable: null, credits: null, absenceLimit: null, percents: [{ period: 1, percent: null }, { period: 2, percent: null }, { period: 3, percent: null }], plan: "" },
   ]);
   assert.deepEqual(parseModuleComponents([[["Comp. Módulo", "Habilitable"], ["MODULO Z", "NO"]]]), [{ module: "MODULO Z", habilitable: false, credits: null, absenceLimit: null, percents: [], plan: "" }]);
+});
+
+test("S2: the first header-matching table with data rows wins over an empty one", () => {
+  const emptyTable = [["Componentes de módulo asociados a este grupo."], HEADER];
+  assert.deepEqual(parseModuleComponents([emptyTable, [HEADER, ROW]]), [COMPONENT]);
+  assert.deepEqual(parseModuleComponents([emptyTable, [HEADER, ["", "", "", "", "", "", "", ""]]]), []);
+  const other = ["OTRO MODULO", "SI", "3", "9", "30", "30", "40", "INGENIERIA_2023"];
+  assert.deepEqual(parseModuleComponents([[HEADER, ROW], [HEADER, other]]), [COMPONENT]);
+});
+
+test("S2-S3: a page that could not be read gives no module info, so the stored values are kept", () => {
+  assert.equal(moduleInfoFromPage(null), undefined);
+  assert.equal(moduleInfoFromPage(undefined), undefined);
+  assert.equal(moduleInfoFromPage("garbled"), undefined);
+  assert.equal(moduleInfoFromPage({ text: undefined, tables: "garbled" }), undefined);
+});
+
+test("S2-S3: a page read without boxes or table gives empty module info; a normal page is parsed", () => {
+  assert.deepEqual(moduleInfoFromPage({ text: "Calificar", tables: [] }), { periods: [], components: [] });
+  assert.deepEqual(moduleInfoFromPage({ text: BOXES.join("\n"), tables: [[HEADER, ROW]] }), { periods: DATES, components: [COMPONENT] });
 });
 
 test("S2: parseModuleInfo combines both and tolerates a missing reading", () => {

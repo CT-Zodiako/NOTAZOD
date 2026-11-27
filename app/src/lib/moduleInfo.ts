@@ -65,16 +65,21 @@ export function homePeriodStrip(groups: ModuleInfoGroup[], courseIds: Iterable<s
 
 const decimal = (value: number) => String(value).replace(".", ",");
 
-// "Pierde con 7 h de falta · Habilitable: No · 2 créditos". Each value comes from the first component
-// that has it, going through the course's groups in the given order and each group's table in order.
-// Missing values are left out; "" when the course has none.
+const known = (value: unknown) => value !== null && value !== undefined;
+
+// "Pierde con 7 h de falta · Habilitable: No · 2 créditos". The line describes one real component: the
+// first one (the course's groups in the given order, each group's table in order) with at least one of
+// the three values. Its missing values are left out and never taken from another component; "" when
+// no component of the course has any of them.
 export function courseModuleSummary(groups: ModuleInfoGroup[], courseId: string) {
-  const components = groups.filter((group) => group.courseId === courseId).flatMap((group) => group.components);
-  const first = <K extends "absenceLimit" | "habilitable" | "credits">(field: K) =>
-    components.map((component) => component[field]).find((value) => value !== null && value !== undefined) ?? null;
-  const absenceLimit = first("absenceLimit");
-  const habilitable = first("habilitable");
-  const credits = first("credits");
+  const component = groups
+    .filter((group) => group.courseId === courseId)
+    .flatMap((group) => group.components)
+    .find((item) => known(item.absenceLimit) || known(item.habilitable) || known(item.credits));
+  if (!component) return "";
+  const absenceLimit = component.absenceLimit ?? null;
+  const habilitable = component.habilitable ?? null;
+  const credits = component.credits ?? null;
   return [
     absenceLimit === null ? "" : `Pierde con ${decimal(absenceLimit)} h de falta`,
     habilitable === null ? "" : `Habilitable: ${habilitable ? "Sí" : "No"}`,
