@@ -12,7 +12,7 @@ Branch `feature/campus-module-info` (from `main` at 502e3f7). Built and tried in
 ## Tasks
 - T1 (S1-S3) Read dates and components in the grading form during sync, pure parsing helpers with tests, store them (additive schema). Route: worker. Commit: 7df7aca, de88581, 38b41c3
 - T2 (S4, S5) Home dates strip and course card module info. Route: worker. Commit: 11a41fb, 38b41c3
-- T3 Try in NOTAZOD Test with a real sync, update docs. Route: inline + user. Commit: pending
+- T3 Try in NOTAZOD Test with a real sync, update docs. Route: inline + user. Commit: n/a (user-tested)
 
 ## Log
 - L1: "quiero que las fehcas de ciere y de apertura este e ngenral en la pantalla pirniapl y y la infmroamco de horas de modulo de perdida por falta recuerpable o no apasres en latarejta de cada materie [Image#1] para cuando se sinornice lo haga" (screenshot of the Campus boxes and components table quoted in S2).
@@ -22,3 +22,5 @@ Branch `feature/campus-module-info` (from `main` at 502e3f7). Built and tried in
 - L5: Independent verifier (Risk: item 1): S1-S5 pass at logic level; upgrade over a baseline-filled DB keeps every row and schema object byte-identical; backup/restore and course delete handle the new table. Unverified: live Campus page, 820px/dark-light look. Advisory comments and suggested tests applied in de88581 (229/229).
 - L6: Native review (base 502e3f7, committed-only, lenses risk + reliability, escalated item 1): approved and acknowledged, lineage review-7c10c406cd36d7ae, authority burned. Non-blocking findings R3-001 (null page read wiped stored info), R3-002 (card mixed values of different components), R3-003 (page/stored boundary untested), R3-004 (first empty matching table hid a later one) fixed in 38b41c3 with tests (233/233, tsc clean); assess of 38b41c3: medium, review not due.
 - L7: Slice boundary: 7df7aca (T1, ~436 lines) | 11a41fb + de88581 + 38b41c3 (T2 and fixes).
+- L8: Same branch, separate requests: "quiero que al exportar lguno de los dos foto o archivo de notas apareszsca un notificacion ya que no sabemos si se desargo o no" → 3049a7e (Rust save_to_downloads + notification; verifier pass, native review approved review-3cc768673527d3d2). "vale ahroa queiro que cundo le de a descargar l afoto y cuando ya se descargeu el modal se cierre solo cuando ya haya descargado al imagen" → image modal closes only after a resolved save (verifier pass, 243/243).
+- L9: User: "ya lo probe enviemoslo a produccion". T3 closed on the user's test in NOTAZOD Test; release as v0.1.9.
