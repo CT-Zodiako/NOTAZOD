@@ -134,9 +134,21 @@ button, input { font: inherit; }
 .home-courses { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .home-course { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: var(--space-2) 10px; border: var(--borderWidth-thin) solid var(--color-border-subtle); border-radius: var(--radius-sm); background: var(--color-surface-raised); color: var(--color-text-default); text-align: left; cursor: pointer; }
 .home-course:hover { border-color: var(--course-color); }
-.home-course b { flex: 1; min-width: 0; font-size: var(--font-size-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home-course-body { flex: 1; min-width: 0; }
+.home-course b { display: block; min-width: 0; font-size: var(--font-size-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.home-course-info { display: block; margin-top: 2px; font-size: 11px; line-height: var(--font-lineHeight-tight); color: var(--color-text-muted); overflow-wrap: anywhere; }
 .home-course small { flex: none; color: var(--color-text-muted); }
 .home-slot:focus-visible, .home-course:focus-visible { outline: var(--borderWidth-focus) solid var(--color-border-focus); outline-offset: 2px; }
+/* Corte dates strip (S4): open in green like the Campus, closed muted, upcoming in the primary color */
+.home-periods { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-2); }
+.home-period { --period-color: var(--color-text-muted); min-width: 0; padding: var(--space-2) 10px; border: var(--borderWidth-thin) solid var(--color-border-subtle); border-left: 3px solid var(--period-color); border-radius: var(--radius-sm); background: var(--color-surface-raised); font-size: 12px; line-height: var(--font-lineHeight-tight); }
+.home-period[data-state="open"] { --period-color: var(--color-feedback-success); border-color: var(--period-color); background: color-mix(in srgb, var(--period-color) 10%, var(--color-surface-raised)); }
+.home-period[data-state="upcoming"] { --period-color: var(--color-action-primary); }
+.home-period-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.home-period-head b { font-size: var(--font-size-xs); font-weight: var(--font-weight-bold); }
+.home-period-state { flex: none; padding: 1px var(--space-2); border-radius: var(--radius-full); font-size: 11px; font-weight: var(--font-weight-bold); color: var(--period-color); background: color-mix(in srgb, var(--period-color) 14%, transparent); }
+.home-period-dates { display: flex; flex-wrap: wrap; column-gap: var(--space-3); row-gap: 2px; margin-top: 4px; color: var(--color-text-muted); }
+.home-period-dates span { white-space: nowrap; }
 @media (max-width: 480px) { .home-courses { grid-template-columns: minmax(0, 1fr); } }
 
 /* Attendance (design/asistencia/01-pestana-sesiones.html): roll call, sessions view and corrections */

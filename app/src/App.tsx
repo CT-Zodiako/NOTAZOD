@@ -29,9 +29,10 @@ import {
   Tooltip,
   useMantineColorScheme,
 } from "@mantine/core";
-import { assignStudentToGroup, AttendanceHistoryEntry, AttendanceMark, AttendanceSession, AttendanceTotal, copyGroupsFromPeriod, correctAttendance, courseAttendanceTotals, Course, createAttendanceSession, listAttendanceHistory, listAttendanceMarks, listAttendanceSessions, COURSE_COLORS, CourseColor, setCourseColor, createCourse, createGradeItem, createGroup, createStudent, deleteCourse, deleteGrade, applyCourseSync, deleteGradeItem, deleteGroup, exportBackup, loadSyncCourses, SyncResult, Grade, GradeHistoryEntry, GradeItem, Group as StudentGroup, GroupMembership, initDatabase, listCourses, listGradeHistory, listGradeItems, listGrades, listGroupMemberships, listGroups, listPeriods, listStudents, Period, renameGradeItem, renameGroup, saveGrade, saveGroupGrade, setPeriodClosed, stageRestore, Student, undoLastGrade, updatePeriod } from "./lib/db";
+import { assignStudentToGroup, AttendanceHistoryEntry, AttendanceMark, AttendanceSession, AttendanceTotal, copyGroupsFromPeriod, correctAttendance, courseAttendanceTotals, Course, createAttendanceSession, listAttendanceHistory, listAttendanceMarks, listAttendanceSessions, COURSE_COLORS, CourseColor, setCourseColor, createCourse, createGradeItem, createGroup, createStudent, deleteCourse, deleteGrade, applyCourseSync, deleteGradeItem, deleteGroup, exportBackup, loadSyncCourses, SyncResult, Grade, GradeHistoryEntry, GradeItem, Group as StudentGroup, GroupMembership, initDatabase, listCampusModuleInfo, CampusGroupModuleInfo, listCourses, listGradeHistory, listGradeItems, listGrades, listGroupMemberships, listGroups, listPeriods, listStudents, Period, renameGradeItem, renameGroup, saveGrade, saveGroupGrade, setPeriodClosed, stageRestore, Student, undoLastGrade, updatePeriod } from "./lib/db";
 import { CampusReport, CheckGroup, openCampusWindow, readCampusCourses, runCampusCheck, runCampusUpload } from "./lib/campus";
 import { currentSemester, planCourseSync, SyncAction } from "./lib/campusSync";
+import { courseModuleSummary, homePeriodStrip, localIsoDate, PeriodState } from "./lib/moduleInfo";
 import { hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
 import { campusStateFor, COURSE_COLOR_SWATCHES, courseColorStyle, countByFilter, hasPendingGrade, heatTint, isAtRisk, matchesFilter, STUDENT_FILTER, StudentFilter, StudentStatus } from "./lib/studentList";
 import { buildWeek, dayLabel, formatTime, nextClass, nextClassLabel, weekdayName } from "./lib/schedule";
@@ -68,6 +69,7 @@ function Icon({ name, size = 16 }: { name: keyof typeof ICON_PATHS; size?: numbe
 }
 
 const campusStateLabels = { uploaded: "✓ Subida", missing: "Falta", different: "Distinta" } as const;
+const periodStateLabels: Record<PeriodState, string> = { open: "Abierto", closed: "Cerrado", upcoming: "Próximo" };
 
 const emptyStudent: StudentDraft = {
   fullName: "",
@@ -89,6 +91,8 @@ function parseGrade(value: string) {
 function App() {
   const { colorScheme, setColorScheme } = useMantineColorScheme();
   const [courses, setCourses] = useState<Course[]>([]);
+  // Corte dates and module components of the synced Campus groups (S4, S5), reloaded with the home data.
+  const [moduleInfo, setModuleInfo] = useState<CampusGroupModuleInfo[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [periods, setPeriods] = useState<Period[]>([]);
   const [periodIndex, setPeriodIndex] = useState(0);
@@ -201,7 +205,7 @@ function App() {
   useEffect(() => {
     initDatabase()
       .then(() => listCourses())
-      .then(setCourses)
+      .then((loaded) => { setCourses(loaded); void reloadModuleInfo(); })
       .catch((error) => {
         const message = error && typeof error === "object" && "fatal" in error && (error as { fatal: boolean }).fatal
           ? (error as { message: string }).message
@@ -217,6 +221,11 @@ function App() {
   }, []);
 
   useEffect(() => () => stopRoulette(), []);
+
+  // A failed read keeps what is shown; the home screen works the same without module info.
+  async function reloadModuleInfo() {
+    try { setModuleInfo(await listCampusModuleInfo()); } catch { /* keep the current module info */ }
+  }
 
   async function handleExportBackup() {
     setBackupMessage(null);
@@ -729,6 +738,7 @@ function App() {
     try {
       setSyncResults(await applyCourseSync(syncPlan));
       setCourses(await listCourses());
+      await reloadModuleInfo();
       setSyncState("done");
     } catch (cause) { setSyncError(cause instanceof Error ? cause.message : String(cause)); setSyncState("error"); }
   }
@@ -1044,18 +1054,25 @@ function App() {
   const homeCourses = courses.filter((course) => course.semester === homeSemester);
   const homeWeek = buildWeek(homeCourses);
   const otherSemesters = [...new Set(courses.map((course) => course.semester))].filter((semesterName) => semesterName !== homeSemester).sort().reverse();
+  const homePeriods = homePeriodStrip(moduleInfo, homeCourses.map((course) => course.id), localIsoDate(now));
   const studentCountLabel = (count: number) => `${count} ${count === 1 ? "estudiante" : "estudiantes"}`;
   const renderHomeCourses = (list: Course[]) => (
     <nav className="home-courses" aria-label="Cursos">
-      {list.map((course) => (
-        <Tooltip key={course.id} label={course.name} openDelay={300} withinPortal>
-          <button type="button" className="home-course" style={courseColorStyle(course.color) as CSSProperties} aria-label={`${course.name}, ${studentCountLabel(course.students)}`} onClick={() => void openCourse(course)}>
-            <span className="home-dot" aria-hidden="true" />
-            <b>{course.name}</b>
-            <small>{course.students}</small>
-          </button>
-        </Tooltip>
-      ))}
+      {list.map((course) => {
+        const summary = courseModuleSummary(moduleInfo, course.id);
+        return (
+          <Tooltip key={course.id} label={course.name} openDelay={300} withinPortal>
+            <button type="button" className="home-course" style={courseColorStyle(course.color) as CSSProperties} aria-label={[`${course.name}, ${studentCountLabel(course.students)}`, summary].filter(Boolean).join(". ")} onClick={() => void openCourse(course)}>
+              <span className="home-dot" aria-hidden="true" />
+              <span className="home-course-body">
+                <b>{course.name}</b>
+                {summary ? <span className="home-course-info">{summary}</span> : null}
+              </span>
+              <small>{course.students}</small>
+            </button>
+          </Tooltip>
+        );
+      })}
     </nav>
   );
 
@@ -1204,6 +1221,22 @@ function App() {
                         </div>
                       </section>
                     )}
+                    {homePeriods.length ? (
+                      <section className="home-periods" aria-label="Fechas de los cortes">
+                        {homePeriods.map((period) => (
+                          <div key={period.period} className="home-period" data-state={period.state}>
+                            <div className="home-period-head">
+                              <b>Corte {period.period}</b>
+                              <span className="home-period-state">{periodStateLabels[period.state]}</span>
+                            </div>
+                            <div className="home-period-dates">
+                              <span>Apertura {period.opensLabel || "—"}</span>
+                              <span>Cierre {period.closesLabel || "—"}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </section>
+                    ) : null}
                     <div className="home-week" style={{ "--week-columns": homeWeek.length } as CSSProperties}>
                       {homeWeek.map((column) => (
                         <section key={column.day} className="home-day" data-today={column.day === now.getDay() || undefined} aria-label={weekdayName(column.day)}>
