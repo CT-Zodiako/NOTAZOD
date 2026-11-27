@@ -2,6 +2,7 @@
 // add missing students to an existing one, or report a conflict. No I/O, so it runs under `node --test`.
 import type { Student } from "./db";
 import { classifyStudentRows, type StudentDraft } from "./validation.ts";
+import type { CampusModuleInfo } from "./campusModuleInfo.ts";
 
 export type CampusCourseGroup = {
   key: string;
@@ -15,14 +16,20 @@ export type CampusCourseGroup = {
   // Campus grading form: the open period column, and the values of the periods before it.
   openColumn?: number | null;
   pastGrades?: { period: number; values: Record<string, string> }[];
+  // Campus grading form: corte dates and module components; absent when the form could not be read.
+  moduleInfo?: CampusModuleInfo;
 };
 // gradedPeriods: period numbers that already have at least one grade in NOTAZOD.
 export type ExistingCourse = { id: string; name: string; semester: string; students: Student[]; gradedPeriods?: number[] };
 export type PeriodImport = { period: number; grades: { code: string; value: number }[] };
 export type PeriodSkip = { period: number; reason: string };
 export type SkippedStudent = { row: StudentDraft; reason: string };
-export type CampusGroupMetadata = { key: string; program: string; group: string; schedule: string; room: string };
-const metadata = (g: CampusCourseGroup): CampusGroupMetadata => ({ key: g.key, program: g.program, group: g.group, schedule: g.schedule ?? "", room: g.room ?? "" });
+// moduleInfo is present only when it was read in this sync; applyCourseSync then refreshes the stored values.
+export type CampusGroupMetadata = { key: string; program: string; group: string; schedule: string; room: string; moduleInfo?: CampusModuleInfo };
+const metadata = (g: CampusCourseGroup): CampusGroupMetadata => ({
+  key: g.key, program: g.program, group: g.group, schedule: g.schedule ?? "", room: g.room ?? "",
+  ...(g.moduleInfo ? { moduleInfo: g.moduleInfo } : {}),
+});
 
 export type SyncAction =
   | { campusGroups: CampusGroupMetadata[]; kind: "create"; groupKeys: string[]; courseName: string; semester: string; toAdd: StudentDraft[]; skipped: SkippedStudent[]; periodImports: PeriodImport[]; periodSkips: PeriodSkip[] }

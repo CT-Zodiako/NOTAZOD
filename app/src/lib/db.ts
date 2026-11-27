@@ -1,6 +1,7 @@
 import Database from "@tauri-apps/plugin-sql";
 import { invoke } from "@tauri-apps/api/core";
 import type { CampusGroupMetadata, ExistingCourse, SyncAction } from "./campusSync";
+import { decodeModuleInfo, encodeModuleInfo, type CampusModuleComponent, type CampusPeriodDates } from "./campusModuleInfo.ts";
 import { applyCorrection, isAttendanceState, isValidSessionHours, isValidStartTime, parseSessionDate, type AttendanceAction, type AttendanceCorrection, type AttendanceState } from "./attendance.ts";
 
 // Palette keys a course color may take (S11, S13), in palette order; App maps each one to a design token.
@@ -205,6 +206,17 @@ export async function initDatabase() {
   `);
   await db.execute("CREATE INDEX IF NOT EXISTS idx_grade_history_pair ON grade_history (student_id, item_id)");
   await createAttendanceSchema(db);
+  // Campus module info per synced group (JSON, see campusModuleInfo.ts): a new table, so existing rows
+  // and tables stay as they are. A row exists only once a sync has read the group's grading form.
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS campus_group_module_info (
+      course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      campus_key TEXT NOT NULL,
+      period_dates TEXT NOT NULL,
+      module_components TEXT NOT NULL,
+      PRIMARY KEY (course_id, campus_key)
+    );
+  `);
 }
 
 // Attendance (S2, S5, S7): new tables only. Times are stored as ISO UTC text.
@@ -357,6 +369,7 @@ export async function exportBackup(destinationPath: string) {
 // Every foreign key a course deletion must cascade through, as "table.column -> parent".
 const COURSE_CASCADE_KEYS = [
   "campus_course_groups.course_id -> courses",
+  "campus_group_module_info.course_id -> courses",
   "students.course_id -> courses",
   "periods.course_id -> courses",
   "grade_items.course_id -> courses",
@@ -887,6 +900,19 @@ export async function loadSyncCourses(): Promise<ExistingCourse[]> {
   }));
 }
 
+// Corte dates and module components of every synced Campus group that has them (SELECT only).
+export type CampusGroupModuleInfo = { courseId: string; key: string; group: string; periods: CampusPeriodDates[]; components: CampusModuleComponent[] };
+
+export async function listCampusModuleInfo(): Promise<CampusGroupModuleInfo[]> {
+  const db = await getDatabase();
+  const rows = await db.select<{ courseId: string; key: string; group: string; periodDates: string | null; moduleComponents: string | null }[]>(`
+    SELECT m.course_id AS courseId, m.campus_key AS key, g.group_name AS "group", m.period_dates AS periodDates, m.module_components AS moduleComponents
+    FROM campus_group_module_info m JOIN campus_course_groups g ON g.course_id = m.course_id AND g.campus_key = m.campus_key
+    ORDER BY g.group_name, m.campus_key
+  `);
+  return rows.map(({ periodDates, moduleComponents, ...row }) => ({ ...row, ...decodeModuleInfo(periodDates, moduleComponents) }));
+}
+
 export type SyncResult = { courseName: string; created: boolean; added: number; failed: { code: string; reason: string }[]; imported: { period: number; grades: number }[]; importSkipped: { period: number; reason: string }[] };
 
 // S4: stores a past Campus period as one "Nota del Campus" activity at 100% and closes the period.
@@ -928,6 +954,12 @@ export async function applyCourseSync(plan: SyncAction[]): Promise<SyncResult[]>
         VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT(course_id, campus_key) DO UPDATE SET program = excluded.program, group_name = excluded.group_name, schedule = excluded.schedule, room = excluded.room`,
         [courseId, group.key, group.program, group.group, group.schedule, group.room]);
+      // Module info read in this sync replaces the stored one (empty values included); a group whose form was not read keeps it.
+      if (!group.moduleInfo) continue;
+      const info = encodeModuleInfo(group.moduleInfo);
+      await db.execute(`INSERT INTO campus_group_module_info (course_id, campus_key, period_dates, module_components) VALUES ($1, $2, $3, $4)
+        ON CONFLICT(course_id, campus_key) DO UPDATE SET period_dates = excluded.period_dates, module_components = excluded.module_components`,
+        [courseId, group.key, info.periodDates, info.moduleComponents]);
     }
     const result: SyncResult = { courseName: action.courseName, created: action.kind === "create", added: 0, failed: [], imported: [], importSkipped: [...action.periodSkips] };
     for (const student of action.toAdd) {

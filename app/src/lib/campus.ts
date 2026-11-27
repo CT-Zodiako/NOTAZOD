@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { buildCampusData, checkUploaded, formatGrade, matchGroup, planUpload, scopeToCourse, verifyGroup, type UploadCheck, type Verification } from "./campusGrades";
 import type { CampusCourseGroup } from "./campusSync";
+import { parseModuleInfo, type CampusFormInfoRaw, type CampusModuleInfo } from "./campusModuleInfo";
 import { loadCampusRows } from "./db";
 import type { StudentDraft } from "./validation";
 
@@ -284,6 +285,15 @@ const READ_INFO_STUDENTS = `${NORMALIZE}
   return [...table.rows].slice(1).filter((row) => row.cells.length >= header.length).map((row) =>
     Object.fromEntries(Object.entries(columns).map(([key, i]) => [key, row.cells[i].textContent.replace(/\\s+/g, " ").trim()])));`;
 
+// S2: raw text for the "Apertura/Cierre Corte N" boxes and the cells of any table with a "Habilitable"
+// header cell (the module components); campusModuleInfo.ts parses them.
+const READ_MODULE_INFO = `${NORMALIZE}
+  const text = document.body ? (document.body.innerText || document.body.textContent || "") : "";
+  const tables = [...document.querySelectorAll("table")]
+    .filter((t) => [...t.rows].some((row) => [...row.cells].some((cell) => norm(cell.textContent).startsWith("habilitable"))))
+    .map((t) => [...t.rows].map((row) => [...row.cells].map((cell) => cell.textContent.replace(/\\s+/g, " ").trim())));
+  return { text, tables };`;
+
 type InfoGroup = { index: number; program: string; group: string; module: string; schedule: string; room: string; hasControl: boolean };
 
 // Reads every Campus group with its students (name, code, document and both emails).
@@ -296,7 +306,7 @@ export async function readCampusCourses(onStatus: (message: string) => void): Pr
   const totals = new Map(graded.map((g) => [`${g.group} | ${g.module}`, g.total]));
 
   // S4: the grading form tells which period is open and holds the values of the periods before it.
-  const periodsByGroup = new Map<string, { openColumn: number | null; pastGrades: { period: number; values: Record<string, string> }[] }>();
+  const periodsByGroup = new Map<string, { openColumn: number | null; pastGrades: { period: number; values: Record<string, string> }[]; moduleInfo?: CampusModuleInfo }>();
   for (const [position, group] of graded.entries()) {
     onStatus(`Leyendo notas del grupo ${position + 1} de ${graded.length}...`);
     await openGroup(groupKey(group));
@@ -305,7 +315,10 @@ export async function readCampusCourses(onStatus: (message: string) => void): Pr
       period: i + 1,
       values: Object.fromEntries(form.rows.filter((row) => row.inputs[i]).map((row) => [row.code, row.inputs[i]!.value])),
     })) : [];
-    periodsByGroup.set(`${group.group} | ${group.module}`, { openColumn: form.openColumn, pastGrades });
+    // S2: corte dates and module components; a page that cannot be read leaves them out and the sync goes on.
+    let moduleInfo: CampusModuleInfo | undefined;
+    try { moduleInfo = parseModuleInfo(await evalInCampus<CampusFormInfoRaw | null>(READ_MODULE_INFO)); } catch { moduleInfo = undefined; }
+    periodsByGroup.set(`${group.group} | ${group.module}`, { openColumn: form.openColumn, pastGrades, moduleInfo });
   }
 
   const openInfo = () => navigate(`location.href = ${JSON.stringify(INFO_URL)}`, `return location.href.startsWith(${JSON.stringify(INFO_URL)});`, "the Información estudiantes list");
@@ -339,6 +352,7 @@ export async function readCampusCourses(onStatus: (message: string) => void): Pr
       expectedCount: totals.get(`${group.group} | ${group.module}`) ?? null,
       openColumn: periodsByGroup.get(`${group.group} | ${group.module}`)?.openColumn ?? null,
       pastGrades: periodsByGroup.get(`${group.group} | ${group.module}`)?.pastGrades ?? [],
+      moduleInfo: periodsByGroup.get(`${group.group} | ${group.module}`)?.moduleInfo,
     });
   }
   return result;

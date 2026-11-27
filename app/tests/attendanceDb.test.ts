@@ -521,7 +521,9 @@ test("initDatabase migrates a previous attendance_history keeping every row byte
 
   assert.deepEqual(storedRows(dbName, ALL_TABLES), before);
   const schemaAfter = schema(dbName);
-  assert.deepEqual(schemaAfter.map((entry) => `${entry.type} ${entry.name}`), schemaBefore.map((entry) => `${entry.type} ${entry.name}`));
+  // The only objects added are the Campus module info table (campus-module-info S3) and its key index.
+  const moduleInfoObjects = ["index sqlite_autoindex_campus_group_module_info_1", "table campus_group_module_info"];
+  assert.deepEqual(schemaAfter.map((entry) => `${entry.type} ${entry.name}`).sort(), [...schemaBefore.map((entry) => `${entry.type} ${entry.name}`), ...moduleInfoObjects].sort());
   for (const entry of schemaBefore.filter((item) => !item.name.startsWith("attendance_history") && item.name !== "idx_attendance_history_pair")) {
     assert.deepEqual(schemaAfter.find((item) => item.name === entry.name), entry);
   }
