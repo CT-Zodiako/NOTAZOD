@@ -2,7 +2,7 @@
 // and the app confirms with a notification. Pure helpers only (no I/O).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { exportFailedMessage, exportSavedMessage, gradeTemplateFile, ipcBytes, periodImageFileName, savedFileName, singleFlight } from "../src/lib/exportFile.ts";
+import { exportFailedMessage, exportSavedMessage, gradeTemplateFile, ipcBytes, periodImageFileName, saveExportAndConfirm, savedFileName, singleFlight } from "../src/lib/exportFile.ts";
 
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 const LINES = [
@@ -69,6 +69,36 @@ test("busy is cleared on every exit: early return, thrown generation error, reje
   await assert.rejects(run(async () => { throw new Error("disk"); }), /disk/);
   assert.deepEqual(busy, [true, false, true, false, true, false]);
   assert.equal(await run(async () => "ok"), "ok");
+});
+
+test("the export modal closes only once the file was saved, after the success notification", async () => {
+  const events: string[] = [];
+  const bytes = new Uint8Array([137, 80]);
+  const saved = await saveExportAndConfirm("image", "notazod-corte-2.png", bytes, {
+    save: async (fileName, data) => { events.push(`save ${fileName} ${[...data].join(",")}`); return "/Users/ana/Downloads/notazod-corte-2 (1).png"; },
+    notify: (notice) => events.push(`${notice.type}: ${notice.text}`),
+    onSaved: () => events.push("close modal"),
+  });
+  assert.equal(saved, true);
+  assert.deepEqual(events, [
+    "save notazod-corte-2.png 137,80",
+    "success: Imagen guardada en Descargas: notazod-corte-2 (1).png",
+    "close modal",
+  ]);
+});
+
+test("a failed save keeps the modal open and shows the error notification", async () => {
+  const events: string[] = [];
+  const logged: unknown[] = [];
+  const saved = await saveExportAndConfirm("grades", "plantilla-notas-corte-3.csv", new Uint8Array(), {
+    save: async () => { throw "Permission denied (os error 13)"; },
+    notify: (notice) => events.push(`${notice.type}: ${notice.text}`),
+    onSaved: () => events.push("close modal"),
+    logError: (error) => logged.push(error),
+  });
+  assert.equal(saved, false);
+  assert.deepEqual(events, ["error: No se pudo guardar el archivo: Permission denied (os error 13)"]);
+  assert.deepEqual(logged, ["Permission denied (os error 13)"]);
 });
 
 test("a failed save shows the reason, whether the command rejected with a string or an Error", () => {

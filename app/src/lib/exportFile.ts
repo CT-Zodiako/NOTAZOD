@@ -37,6 +37,34 @@ export function exportFailedMessage(error: unknown) {
   return `No se pudo guardar el archivo: ${error instanceof Error ? error.message : String(error)}`;
 }
 
+export type ExportNotice = { type: "success" | "error"; text: string };
+
+// Saves an export and confirms it. onSaved (closing the export modal) runs only after the file was
+// saved; a failed save shows the error notification and leaves the modal open. True when saved.
+export async function saveExportAndConfirm(
+  kind: ExportKind,
+  fileName: string,
+  bytes: Uint8Array,
+  deps: {
+    save: (fileName: string, bytes: Uint8Array) => Promise<string>;
+    notify: (notice: ExportNotice) => void;
+    onSaved: () => void;
+    logError?: (error: unknown) => void;
+  },
+) {
+  let savedPath: string;
+  try {
+    savedPath = await deps.save(fileName, bytes);
+  } catch (error) {
+    deps.logError?.(error);
+    deps.notify({ type: "error", text: exportFailedMessage(error) });
+    return false;
+  }
+  deps.notify({ type: "success", text: exportSavedMessage(kind, savedPath) });
+  deps.onSaved();
+  return true;
+}
+
 // Runs one export at a time: a call while another is generating or saving is ignored (returns
 // undefined). onBusyChange(true) fires before the task starts and onBusyChange(false) on every exit.
 export function singleFlight(onBusyChange: (busy: boolean) => void) {

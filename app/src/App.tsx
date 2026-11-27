@@ -37,7 +37,7 @@ import { currentSemester, planCourseSync, SyncAction } from "./lib/campusSync";
 import { courseModuleSummary, homePeriodStrip, localIsoDate, PeriodState } from "./lib/moduleInfo";
 import { hasErrors, StudentDraft, StudentValidation, validateStudent } from "./lib/validation";
 import { campusStateFor, COURSE_COLOR_SWATCHES, courseColorStyle, countByFilter, hasPendingGrade, heatTint, isAtRisk, matchesFilter, STUDENT_FILTER, StudentFilter, StudentStatus } from "./lib/studentList";
-import { ExportKind, exportFailedMessage, exportSavedMessage, gradeTemplateFile, periodImageFileName, saveToDownloads, singleFlight } from "./lib/exportFile";
+import { ExportKind, gradeTemplateFile, periodImageFileName, saveExportAndConfirm, saveToDownloads, singleFlight } from "./lib/exportFile";
 import { buildWeek, dayLabel, formatTime, nextClass, nextClassLabel, weekdayName } from "./lib/schedule";
 import { absenceLabel, AttendanceState, hourRangeLabel, lateArrivalStates, toggleCorrectionHour, courseTotalLabel, defaultSessionTiming, describeHistoryEntry, formatSessionDate, isValidSessionHours, MAX_SESSION_HOURS, MIN_SESSION_HOURS, resizeStates, rollCallDefaults, rollCallSummary, sessionLabel, stateCounts, toggleHour, toggleStudent } from "./lib/attendance";
 
@@ -236,17 +236,14 @@ function App() {
     return () => clearTimeout(timer);
   }, [exportNotice]);
 
-  // Saves an export to Downloads and confirms it with a notification; true when it was saved.
-  async function saveExport(kind: ExportKind, fileName: string, bytes: Uint8Array) {
-    try {
-      const savedPath = await saveToDownloads(fileName, bytes);
-      setExportNotice({ id: Date.now(), type: "success", text: exportSavedMessage(kind, savedPath) });
-      return true;
-    } catch (error) {
-      console.error("No se pudo guardar la exportación", error);
-      setExportNotice({ id: Date.now(), type: "error", text: exportFailedMessage(error) });
-      return false;
-    }
+  // Saves an export to Downloads and confirms it with a notification; closeModal runs only once saved.
+  function saveExport(kind: ExportKind, fileName: string, bytes: Uint8Array, closeModal: () => void) {
+    return saveExportAndConfirm(kind, fileName, bytes, {
+      save: saveToDownloads,
+      notify: (notice) => setExportNotice({ id: Date.now(), ...notice }),
+      onSaved: closeModal,
+      logError: (error) => console.error("No se pudo guardar la exportación", error),
+    });
   }
 
   // A failed read keeps what is shown; the home screen works the same without module info.
@@ -712,7 +709,7 @@ function App() {
       setExportError("No se pudo generar la imagen con esas columnas. Probá reducir la cantidad de campos.");
       return;
     }
-    await saveExport("image", periodImageFileName(activePeriod.number), bytes);
+    await saveExport("image", periodImageFileName(activePeriod.number), bytes, () => setExportModal(false));
   }
 
   function openRenameActivity(item: GradeItem) {
@@ -1010,7 +1007,7 @@ function App() {
       return String(value ?? "");
     }))];
     const file = gradeTemplateFile(lines, format, activePeriod.number);
-    if (await saveExport("grades", file.fileName, file.bytes)) setTemplateModal(false);
+    await saveExport("grades", file.fileName, file.bytes, () => setTemplateModal(false));
   }
 
   async function checkForUpdates(showModal = true) {
